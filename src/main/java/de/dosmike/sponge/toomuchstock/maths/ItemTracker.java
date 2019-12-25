@@ -22,15 +22,24 @@ public class ItemTracker {
 
     /**
      * From the players view income is positive, so the max value is the amount
-     * players can earn by selling items, the min is the amount they can spend on
-     * buying items.
+     * players can earn by selling items.
      */
     private Map<Currency, BiBoundBigDecimalValue> incomeLimit = new HashMap<>();
     /**
-     * Too keep signs in line with the income limit, a player can sell a total of
-     * itemLimit#getMax() items or buy a total of itemLimit#getMin()(
+     * From the players view income is positive, so the max value is the amount
+     * players can spend on buying items.
      */
-    private BiBoundIntegerValue itemLimit;
+    private Map<Currency, BiBoundBigDecimalValue> spendingLimit = new HashMap<>();
+    /**
+     * Too keep signs in line with the income limit, a player can sell a total of
+     * itemLimit#getMax() items or buy a total of itemBuyLimit#getMin()
+     */
+    private BiBoundIntegerValue itemBuyLimit;
+    /**
+     * Too keep signs in line with the income limit, a player can buy a total
+     * of itemSellLimit#getMax()
+     */
+    private BiBoundIntegerValue itemSellLimit;
 
     /**
      * The rate at which the price for this item goes down every time a single item
@@ -83,9 +92,13 @@ public class ItemTracker {
         copy.dispersionDevaluation = 0;
         copy.growthRate = growthRate;
         for (Map.Entry<Currency, BiBoundBigDecimalValue> e : incomeLimit.entrySet()) {
-            copy.incomeLimit.put(e.getKey(), new BiBoundBigDecimalValue(e.getValue().getMin(), e.getValue().getMax()));
+            copy.incomeLimit.put(e.getKey(), new BiBoundBigDecimalValue(BigDecimal.ZERO, e.getValue().getMax()));
         }
-        copy.itemLimit = new BiBoundIntegerValue(itemLimit.getMin(), itemLimit.getMax());
+        for (Map.Entry<Currency, BiBoundBigDecimalValue> e : spendingLimit.entrySet()) {
+            copy.spendingLimit.put(e.getKey(), new BiBoundBigDecimalValue(BigDecimal.ZERO, e.getValue().getMax()));
+        }
+        copy.itemBuyLimit = new BiBoundIntegerValue(0, itemBuyLimit.getMax());
+        copy.itemSellLimit = new BiBoundIntegerValue(0, itemSellLimit.getMax());
         return copy;
     }
 
@@ -159,16 +172,57 @@ public class ItemTracker {
         return multiplier;
     }
 
+    /** true if this manipulator was specified in the config and is not derived
+     * from a default manipulator */
+    boolean derived = false;
+    /** @return true if this manipulator was specified in the config and is not derived
+     * from a default manipulator */
+    public boolean isDerived() {
+        return derived;
+    }
+
+    /** @return how many of this item are still purchasable within this tracker */
+    public int getPurchaseItemCapacity() {
+        Integer volume = itemBuyLimit.getIncreaseVolume();
+        return volume == null ? Integer.MAX_VALUE : volume;
+    }
+    /** @return how many of this item are still distributable within this tracker */
+    public int getDistributeItemCapacity() {
+        Integer volume = itemSellLimit.getIncreaseVolume();
+        return volume == null ? Integer.MAX_VALUE : volume;
+    }
+    /** @return how much money worth of this item is still purchasable within this tracker */
+    public BigDecimal getPurchaseValueCapacity(Currency currency) {
+        if (!spendingLimit.containsKey(currency)) return BigDecimal.valueOf(Double.POSITIVE_INFINITY); //unregulated
+        BigDecimal volume = spendingLimit.get(currency).getIncreaseVolume();
+        return volume == null ? BigDecimal.valueOf(Double.POSITIVE_INFINITY) : volume;
+    }
+    /** @return how much money worth of this item is still distributable within this tracker */
+    public BigDecimal getDistributeValueCapacity(Currency currency) {
+        if (!incomeLimit.containsKey(currency)) return BigDecimal.valueOf(Double.POSITIVE_INFINITY); //unregulated
+        BigDecimal volume = incomeLimit.get(currency).getIncreaseVolume();
+        return volume == null ? BigDecimal.valueOf(Double.POSITIVE_INFINITY) : volume;
+    }
+
     public static ItemTracker fromConfiguration(Predicate<ItemStackSnapshot> filter, ConfigurationNode node) throws ObjectMappingException {
         ItemTracker result = new ItemTracker();
         for (org.spongepowered.api.service.economy.Currency currency : TooMuchStock.getEconomy().getCurrencies()) {
             result.incomeLimit.put(currency, new BiBoundBigDecimalValue(
-                    node.getNode("spendingLimit").getNode(currency.getId()).getValue(TypeToken.of(BigDecimal.class)),
+                    BigDecimal.ZERO,
                     node.getNode("incomeLimit").getNode(currency.getId()).getValue(TypeToken.of(BigDecimal.class)),
                     BigDecimal.ZERO));
+            result.spendingLimit.put(currency, new BiBoundBigDecimalValue(
+                    BigDecimal.ZERO,
+                    node.getNode("spendingLimit").getNode(currency.getId()).getValue(TypeToken.of(BigDecimal.class)),
+                    BigDecimal.ZERO));
         }
-        result.itemLimit = new BiBoundIntegerValue(
+        result.itemBuyLimit = new BiBoundIntegerValue(
+                0,
                 node.getNode("aggregateAmount").isVirtual() ? null : node.getNode("aggregateAmount").getInt(),
+                0
+        );
+        result.itemSellLimit = new BiBoundIntegerValue(
+                0,
                 node.getNode("disperseAmount").isVirtual() ? null : node.getNode("disperseAmount").getInt(),
                 0
         );
@@ -181,4 +235,13 @@ public class ItemTracker {
         return result;
     }
 
+    public ItemTracker clone() {
+        return newTracker(applicabilityFilter);
+    }
+
+    @Override
+    public String toString() {
+        return "ItemTracker for " +
+                applicabilityFilter;
+    }
 }

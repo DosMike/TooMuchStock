@@ -51,19 +51,21 @@ public class DecayUtil {
         );
     }
 
-    /** basic exponential growth formula y = a*(r+1)^x */
+    /** basic exponential growth formula y = a*(1+r)^x
+     * the growth rate as percentage is 1+r */
     public static double exponentialGrowth(double initialValue, double growthRate, int iterations) {
         if (iterations < 0) throw new IllegalArgumentException("Amount can't be negative");
         if (iterations == 0) return initialValue;
         if (growthRate == 1) return initialValue; // no decay, so it's a simple multiplication
-        return initialValue * Math.pow(growthRate-1, iterations);
+        return initialValue * Math.pow(1+growthRate, iterations);
     }
-    /** basic exponential decay formula y = a*(r-1)^x */
+    /** basic exponential decay formula y = a*(1-r)^x
+     * the decay rate as percentage is 1-r */
     public static double exponentialDecay(double initialValue, double decayRate, int iterations) {
         if (iterations < 0) throw new IllegalArgumentException("Amount can't be negative");
         if (iterations == 0) return initialValue;
         if (decayRate == 1) return initialValue; // no decay, so it's a simple multiplication
-        return initialValue * Math.pow(decayRate-1, iterations);
+        return initialValue * Math.pow(1-decayRate, iterations);
     }
     /** calculates the exponential growth with a for loop, returning every value after n iterations as position in the
      * list. This might be useful in cases where you don't know the exact amount of iterations, so you can search the

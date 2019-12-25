@@ -8,12 +8,14 @@ import org.spongepowered.api.util.TypeTokens;
 import java.util.HashMap;
 import java.util.function.Predicate;
 
-public class ItemDefinitions extends HashMap<String, Predicate<ItemStackSnapshot>> {
+public class ItemDefinitions extends HashMap<String, ApplicabilityFilters> {
 
     /** parses the definition and add it with the specified key string */
     public void fromConfiguration(String name, ConfigurationNode definition) throws ObjectMappingException {
 
-        String nbtrule = definition.getNode("nbt").getString("IGNORE");
+        if (!name.startsWith("$"))
+            throw new ObjectMappingException("Names of item definitions have to start with $");
+        String nbtrule = definition.getNode("filter").getString("IGNORE");
         if ("exact".equalsIgnoreCase(nbtrule)) {
             put(name, ApplicabilityFilters.generateContainerExactEquals(definition.getNode("item").getValue(TypeTokens.ITEM_SNAPSHOT_TOKEN)));
         } else {
@@ -30,6 +32,8 @@ public class ItemDefinitions extends HashMap<String, Predicate<ItemStackSnapshot
                 put(name, ApplicabilityFilters.generateItemTypeMetaEquals(type));
             } else if ("type".equalsIgnoreCase(nbtrule)) {
                 put(name, ApplicabilityFilters.generateItemTypeEquals(type.getType()));
+            } else {
+                throw new ObjectMappingException("Invalid filter "+nbtrule+" for "+type+" ("+name+")");
             }
         }
 

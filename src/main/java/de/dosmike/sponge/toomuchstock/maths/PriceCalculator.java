@@ -1,40 +1,91 @@
 package de.dosmike.sponge.toomuchstock.maths;
 
 import com.google.common.collect.ImmutableList;
+import de.dosmike.sponge.toomuchstock.TooMuchStock;
 import de.dosmike.sponge.toomuchstock.utils.DecayUtil;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.api.Sponge;
 import org.spongepowered.api.item.inventory.ItemStack;
 import org.spongepowered.api.item.inventory.ItemStackSnapshot;
+import org.spongepowered.api.service.economy.Currency;
+import org.spongepowered.api.service.economy.account.UniqueAccount;
 
 import java.math.BigDecimal;
 import java.util.*;
 
 public class PriceCalculator {
 
-    PriceManipulator globalManip;
-    Map<UUID, PriceManipulator> shopManips = new HashMap<>();
-    Map<UUID, PriceManipulator> playerManips = new HashMap<>();
+    private PriceManipulator globalManip;
+    private Map<UUID, PriceManipulator> shopManips = new HashMap<>();
+    private Map<UUID, PriceManipulator> playerManips = new HashMap<>();
+
+    private PriceManipulator shopBase;
+    private PriceManipulator playerBase;
+
+    private PriceCalculator(PriceManipulator baseGlobalManip, PriceManipulator baseShopManip, PriceManipulator basePlayerManip) {
+        this.globalManip = baseGlobalManip;
+        this.shopBase = baseShopManip;
+        this.playerBase = basePlayerManip;
+    }
+
+    //Region builder
+    public static class Builder {
+        PriceManipulator manipulatorTemplateGlobal = null;
+        PriceManipulator manipulatorTemplateShops = null;
+        PriceManipulator manipulatorTemplatePlayer = null;
+        private Builder() {}
+        public Builder setGlobalManipulatorTemplate(PriceManipulator manipulator) {
+            manipulatorTemplateGlobal = manipulator;
+            return Builder.this;
+        }
+        public Builder setShopsManipulatorTemplate(PriceManipulator manipulator) {
+            manipulatorTemplateGlobal = manipulator;
+            return Builder.this;
+        }
+        public Builder setPlayerManipulatorTemplate(PriceManipulator manipulator) {
+            manipulatorTemplateGlobal = manipulator;
+            return Builder.this;
+        }
+        public PriceCalculator build() {
+            if (manipulatorTemplateGlobal == null ||
+                manipulatorTemplateShops == null ||
+                manipulatorTemplatePlayer == null)
+                throw new IllegalStateException("Not all manipulators were set");
+            return new PriceCalculator(manipulatorTemplateGlobal, manipulatorTemplateShops, manipulatorTemplatePlayer);
+        }
+    }
+    public static Builder builder() {
+        return new Builder();
+    }
+    //endregion
 
     public Result getPurchaseInformation(ItemStack item, int amount, BigDecimal staticPrice, Currency currency, @Nullable UUID shopID, @Nullable UUID playerID) {
         return getPurchaseInformation(item.createSnapshot(), amount, staticPrice, currency, shopID, playerID);
     }
     public Result getPurchaseInformation(ItemStackSnapshot item, int amount, BigDecimal staticPrice, Currency currency, @Nullable UUID shopID, @Nullable UUID playerID) {
         ItemTracker global = globalManip.getTrackerFor(item);
-        ItemTracker shop = shopManips.get(shopID).getTrackerFor(item); //or null
-        ItemTracker player = playerManips.get(playerID).getTrackerFor(item); //or null
+        PriceManipulator manip = shopManips.get(shopID);
+        if (manip == null) shopManips.put(shopID, manip = shopBase.clone());
+        ItemTracker shop = manip.getTrackerFor(item); //or null
+        manip = playerManips.get(shopID);
+        if (manip == null) playerManips.put(shopID, manip = playerBase.clone());
+        ItemTracker player = manip.getTrackerFor(item); //or null
 
-        return new Result(global, shop, player, item, amount, true, staticPrice, getAccountBalance(playerID, currency));
+        return new Result(global, shop, player, item, amount, true, staticPrice, currency, getAccountBalance(playerID, currency));
     }
     public Result getSellingInformation(ItemStack item, int amount, BigDecimal staticPrice, Currency currency, @Nullable UUID shopID, @Nullable UUID playerID) {
         return getSellingInformation(item.createSnapshot(), amount, staticPrice, currency, shopID, playerID);
     }
     public Result getSellingInformation(ItemStackSnapshot item, int amount, BigDecimal staticPrice, Currency currency, @Nullable UUID shopID, @Nullable UUID playerID) {
         ItemTracker global = globalManip.getTrackerFor(item);
-        ItemTracker shop = shopManips.get(shopID).getTrackerFor(item); //or null
-        ItemTracker player = playerManips.get(playerID).getTrackerFor(item); //or null
+        PriceManipulator manip = shopManips.get(shopID);
+        if (manip == null) shopManips.put(shopID, manip = shopBase.clone());
+        ItemTracker shop = manip.getTrackerFor(item); //or null
+        manip = playerManips.get(shopID);
+        if (manip == null) playerManips.put(shopID, manip = playerBase.clone());
+        ItemTracker player = manip.getTrackerFor(item); //or null
 
-        return new Result(global, shop, player, item, amount, false, staticPrice, getAccountCapacity(playerID, currency));
+        return new Result(global, shop, player, item, amount, false, staticPrice, currency, getAccountCapacity(playerID, currency));
     }
     /**
      * this is for display only as it's less stress to compute. For the actual sell/purchase procedure,
@@ -51,8 +102,12 @@ public class PriceCalculator {
      */
     public BigDecimal getCurrentPurchasePrice(ItemStackSnapshot item, int amount, BigDecimal staticPrice, @Nullable UUID shopID, @Nullable UUID playerID) {
         ItemTracker global = globalManip.getTrackerFor(item);
-        ItemTracker shop = shopManips.get(shopID).getTrackerFor(item); //or null
-        ItemTracker player = playerManips.get(playerID).getTrackerFor(item); //or null
+        PriceManipulator manip = shopManips.get(shopID);
+        if (manip == null) shopManips.put(shopID, manip = shopBase.clone());
+        ItemTracker shop = manip.getTrackerFor(item); //or null
+        manip = playerManips.get(shopID);
+        if (manip == null) playerManips.put(shopID, manip = playerBase.clone());
+        ItemTracker player = manip.getTrackerFor(item); //or null
 
         double scale = 1d;
         scale = scale * DecayUtil.exponentialGrowth(global.peek(), global.getGrowthRate(), amount);
@@ -79,8 +134,12 @@ public class PriceCalculator {
      */
     public BigDecimal getCurrentSellingPrice(ItemStackSnapshot item, int amount, BigDecimal staticPrice, @Nullable UUID shopID, @Nullable UUID playerID) {
         ItemTracker global = globalManip.getTrackerFor(item);
-        ItemTracker shop = shopManips.get(shopID).getTrackerFor(item); //or null
-        ItemTracker player = playerManips.get(playerID).getTrackerFor(item); //or null
+        PriceManipulator manip = shopManips.get(shopID);
+        if (manip == null) shopManips.put(shopID, manip = shopBase.clone());
+        ItemTracker shop = manip.getTrackerFor(item); //or null
+        manip = playerManips.get(shopID);
+        if (manip == null) playerManips.put(shopID, manip = playerBase.clone());
+        ItemTracker player = manip.getTrackerFor(item); //or null
 
         double scale = 1d;
         scale = scale * DecayUtil.exponentialGrowth(global.peek(), global.getDecayRate(), amount);
@@ -103,20 +162,22 @@ public class PriceCalculator {
         boolean purchase;
         BigDecimal staticPrice;
         BigDecimal playerBalance;
+        Currency currency;
         /** the value of &lt;index&gt; items */
         List<BigDecimal> nItemValue;
-        int canAfford; //check the player balance
+        int canAfford; //check the player balance, shop eco limits and shop amount limits
         /**
          * @param purchase if the player purchases items -> price will grow
          * @param playerBalance if selling this value should be the remaining capacity in the players account or NULL
          */
-        public Result(ItemTracker global, @Nullable ItemTracker shop, @Nullable ItemTracker player, ItemStackSnapshot item, int amount, boolean purchase, BigDecimal staticPrice, @Nullable BigDecimal playerBalance) {
+        public Result(ItemTracker global, @Nullable ItemTracker shop, @Nullable ItemTracker player, ItemStackSnapshot item, int amount, boolean purchase, BigDecimal staticPrice, Currency currency, @Nullable BigDecimal playerBalance) {
             this.global = global;
             this.shop = shop;
             this.player = player;
             this.item = item;
             this.amount = amount;
             this.staticPrice = staticPrice;
+            this.currency = currency;
             this.playerBalance = playerBalance;
             nItemValue = new ArrayList<>(amount+1);
             canAfford = purchase ? 0 : Integer.MAX_VALUE;
@@ -127,29 +188,68 @@ public class PriceCalculator {
         public void update() {
             List<Double> scales = new ArrayList<>(amount+1);
             Collections.fill(scales, 1d);
+            // max value is minimum available value over all trackers
+            BigDecimal maxValue;
+            // max amount is minimum available amount over all trackers
+            int maxAmount;
             scales = multiply(scales, purchase
                     ? DecayUtil.createGrowthMultiplicationVector(global.peek(), global.getGrowthRate(), amount)
                     : DecayUtil.createDecayMultiplicationVector(global.peek(), global.getDecayRate(), amount)
             );
+            if (purchase) {
+                maxValue = global.getPurchaseValueCapacity(currency);
+                maxAmount = global.getPurchaseItemCapacity();
+            } else {
+                maxValue = global.getDistributeValueCapacity(currency);
+                maxAmount = global.getDistributeItemCapacity();
+            }
             if (shop != null) {
                 scales = multiply(scales, purchase
                         ? DecayUtil.createGrowthMultiplicationVector(shop.peek(), shop.getGrowthRate(), amount)
                         : DecayUtil.createDecayMultiplicationVector(shop.peek(), shop.getDecayRate(), amount)
                 );
+                if (purchase) {
+                    BigDecimal cap = shop.getPurchaseValueCapacity(currency);
+                    if (cap.compareTo(maxValue)<0) maxValue = cap;
+                    int cnt = shop.getPurchaseItemCapacity();
+                    if (cnt < maxAmount) maxAmount = cnt;
+                } else {
+                    BigDecimal cap = shop.getDistributeValueCapacity(currency);
+                    if (cap.compareTo(maxValue)<0) maxValue = cap;
+                    int cnt = shop.getDistributeItemCapacity();
+                    if (cnt < maxAmount) maxAmount = cnt;
+                }
             }
             if (player != null) {
                 scales = multiply(scales, purchase
                         ? DecayUtil.createGrowthMultiplicationVector(player.peek(), player.getGrowthRate(), amount)
                         : DecayUtil.createDecayMultiplicationVector(player.peek(), player.getDecayRate(), amount)
                 );
+                if (purchase) {
+                    BigDecimal cap = player.getPurchaseValueCapacity(currency);
+                    if (cap.compareTo(maxValue)<0) maxValue = cap;
+                    int cnt = player.getPurchaseItemCapacity();
+                    if (cnt < maxAmount) maxAmount = cnt;
+                } else {
+                    BigDecimal cap = player.getDistributeValueCapacity(currency);
+                    if (cap.compareTo(maxValue)<0) maxValue = cap;
+                    int cnt = player.getDistributeItemCapacity();
+                    if (cnt < maxAmount) maxAmount = cnt;
+                }
             }
             BigDecimal thisValue;
             for (int i = 1; i < amount; i++) {
                 thisValue = staticPrice.multiply(BigDecimal.valueOf(scales.get(i-1))); //price of 1 item is static price * multiplier after 0 iterations
                 nItemValue.set(i, thisValue);
-                if (playerBalance != null) {
-                    if ((purchase && playerBalance.compareTo(thisValue)>=0) || //this player has more money then this amount will cost OR
-                        (!purchase && thisValue.compareTo(playerBalance)<=0)) { //this value still fits in the player remaining account capacity
+                if (purchase) {
+                    if ((playerBalance == null || playerBalance.compareTo(thisValue) >= 0) &&
+                        amount <= maxAmount && thisValue.compareTo(maxValue) <= 0) {
+                        canAfford = i;
+                    }
+                } else {
+                    //this value still fits in the player remaining account capacity
+                    if ((playerBalance == null || thisValue.compareTo(playerBalance)<=0) &&
+                        amount <= maxAmount && thisValue.compareTo(maxValue) <= 0) {
                         canAfford = i;
                     }
                 }
@@ -171,12 +271,20 @@ public class PriceCalculator {
         }
         /** @return the amount of items the player can afford if this Result expresses a purchase. Otherwise the player balance was interpreted as
          * account limit and this equals the amount of items the player can sell, before the account hits it's limit.
-         * In case playerBalance == null returns Integer.maxValue if selling and 0 if purchasing*/
+         * In case playerBalance == null returns Integer.maxValue if selling and 0 if purchasing.
+         * This value takes into account the player balance as well as the  maximum trade-capacity
+         * of the server/shop/player through item count and economy value. You can not confirm an amount greater
+         * than this!
+         */
         public int getAffordableAmount() {
             return canAfford;
         }
-        /** confirm that the specified amount of items was just purchased or sold and to adjust price rates now */
+        /** confirm that the specified amount of items was just purchased or sold and to adjust price rates now
+         * @throws IllegalArgumentException if amount is greater than {@link #getAffordableAmount()}
+         */
         public void confirm(int amount) {
+            if (amount > canAfford)
+                throw new IllegalArgumentException("The specified amount can not be traded!");
             if (amount < 1) return;
             if (purchase) {
                 global.grow(amount);
@@ -192,13 +300,12 @@ public class PriceCalculator {
     }
 
     private BigDecimal getAccountBalance(@Nullable UUID playerID, Currency currency) {
-        //TODO
-        return BigDecimal.ZERO;
+        Optional<UniqueAccount> account = TooMuchStock.getEconomy().getOrCreateAccount(playerID);
+        return account.map(uniqueAccount -> uniqueAccount.getBalance(currency)).orElse(BigDecimal.ZERO);
     }
     /** @return null if accounts for this currency are not capped */
     private BigDecimal getAccountCapacity(@Nullable UUID playerID, Currency currency) {
-        //TODO
-        return BigDecimal.ZERO;
+        return null; //don't know how to get that
     }
 
 }
