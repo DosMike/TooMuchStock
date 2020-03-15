@@ -19,17 +19,43 @@ in place:
 Every aspect can be tuned and disabled through a config file. Most 
 configurations can be done per item through item type / meta or nbt filters.
 
+**Keep in mind that this plugin primarily tracks price increase**, this means
+you can still make shops that sell items for more or less money (e.g. black markets)
+but the prices still scale with demand and supply!
+
+**Additional features:**
+* Create Item aliases through a command, for use in per item configurations
+* Visuall display global price history and player specific price history per item
+
+## Example config
+
+An example configuration with comments can be found [here](https://github.com/DosMike/TooMuchStock/blob/master/example.conf).
+
+## Pricing API
+
+The interface can be obtained as Service using PriceCalculationService:
+```Java
+@Listener public void onChangeServiceProvider(ChangeServiceProviderEvent event) {
+	if (event.getService().equals(PriceCalculationService.class)) {
+		pricingService = (PriceCalculationService) event.getNewProvider();
+	}
+}
+```
+
 The API provides current prices with   
-`PriceCalculator.getCurrentPurchasePrice(ItemStackSnapshot item, int amount, BigDecimal staticPrice, @Nullable UUID shopID, @Nullable UUID playerID)`
+`pricingService.getCurrentPurchasePrice(ItemStackSnapshot item, int amount, BigDecimal staticPrice, @Nullable UUID shopID, @Nullable UUID playerID)`
 
 As soon as a player shows interest in items and due to the exponential nature
 of dynamic prices the next step would be to call   
-`Result result = PriceCalculator.getPurchaseInformation(ItemStackSnapshot item, int amount, BigDecimal staticPrice, Currency currency, @Nullable UUID shopID, @Nullable UUID playerID)`   
-with the result holding all price steps up to amount, and the amount of items 
+`TransactionPreview preview = pricingService.getPurchaseInformation(ItemStackSnapshot item, int amount, BigDecimal staticPrice, Currency currency, @Nullable UUID shopID, @Nullable UUID playerID)`   
+with the preview holding all price steps up to amount, and the amount of items 
 the player can afford (to buy OR sell until they hit account limits).  
-The Transaction should be finished with a call to result.confirm like   
-`result.confirm(result.getAffordableAmount())`   
+The Transaction should be finished with a call to preview.confirm like   
+`preview.confirm(preview.getAffordableAmount())`   
 to actually update the prices within the trackers.
 
-Once a price changes thgrough a transaction, discrapency decay or reset a 
+Once a price changes through a transaction, discrapency decay or reset a 
 PriceChangeEvent will be emitted for plugins to update their dispalys.
+
+/* Note: I'll add an example on how to optionally use this plugin, 
+so you do not have to depend on it */
