@@ -1,10 +1,9 @@
 package de.dosmike.sponge.toomuchstock.maths;
 
+import com.google.common.base.Objects;
 import com.google.common.reflect.TypeToken;
 import de.dosmike.sponge.toomuchstock.TooMuchStock;
-import de.dosmike.sponge.toomuchstock.utils.BiBoundBigDecimalValue;
-import de.dosmike.sponge.toomuchstock.utils.BiBoundIntegerValue;
-import de.dosmike.sponge.toomuchstock.utils.DecayUtil;
+import de.dosmike.sponge.toomuchstock.utils.*;
 import ninja.leaping.configurate.ConfigurationNode;
 import ninja.leaping.configurate.objectmapping.ObjectMappingException;
 import org.spongepowered.api.item.inventory.ItemStackSnapshot;
@@ -17,8 +16,13 @@ import java.util.function.Predicate;
 
 public class ItemTracker {
 
+    private static final int stonkDuration = 30; //minutes
+    private Stonks stonks = new Stonks(stonkDuration);
+
     /** Checks whether the supplied item stack will be affected by this tracker */
-    private Predicate<ItemStackSnapshot> applicabilityFilter;
+    private ApplicabilityFilters<?> applicabilityFilter;
+    /** Stores the name of a item definition or item type for serialization */
+    private String filterName = "Custom";
 
     /**
      * From the players view income is positive, so the max value is the amount
@@ -79,13 +83,17 @@ public class ItemTracker {
     public Predicate<ItemStackSnapshot> getApplicabilityFilter() {
         return applicabilityFilter;
     }
+    String getApplicabilityFilterName() {
+        return filterName;
+    }
 
     /**
      * Creates a new tracker with the same configuration, but the supplied applicability filter
      */
-    public ItemTracker newTracker(Predicate<ItemStackSnapshot> filter) {
+    public ItemTracker newTracker(ApplicabilityFilters<?> filter) {
         ItemTracker copy = new ItemTracker();
         copy.applicabilityFilter = filter;
+        copy.filterName = filterName;
         copy.decayConstant = decayConstant;
         copy.decayRate = decayRate;
         copy.discrepancy = 0;
@@ -102,6 +110,44 @@ public class ItemTracker {
         return copy;
     }
 
+    public ItemTracker clone() {
+        return newTracker(applicabilityFilter);
+    }
+
+    /** pull values from another instance to minimize abuse on reload */
+    public void merge(ItemTracker other) {
+        decayConstant = other.decayConstant;
+        decayRate = other.decayRate;
+        growthRate = other.growthRate;
+        dispersionDevaluation = other.dispersionDevaluation;
+
+        incomeLimit.clear();
+        incomeLimit.putAll(other.incomeLimit);
+        spendingLimit.clear();
+        spendingLimit.putAll(other.spendingLimit);
+
+        int oldVal = itemBuyLimit.getValue();
+        itemBuyLimit = new BiBoundIntegerValue(other.itemBuyLimit.getMin(), other.itemBuyLimit.getMax());
+        try { itemBuyLimit.setValue(oldVal); } catch (Exception ignore) {}
+        oldVal = itemSellLimit.getValue();
+        itemSellLimit = new BiBoundIntegerValue(other.itemSellLimit.getMin(), other.itemSellLimit.getMax());
+        try { itemSellLimit.setValue(oldVal); } catch (Exception ignore) {}
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        ItemTracker that = (ItemTracker) o;
+        return Objects.equal(applicabilityFilter, that.applicabilityFilter) &&
+                filterName.equalsIgnoreCase(that.filterName);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hashCode(applicabilityFilter, filterName);
+    }
+
     /**
      * In order to update the price every minute the decay constant (lambda) is
      * required to calculate N(t+1) = N(t) * e ^ (-lambda * 1).
@@ -113,6 +159,8 @@ public class ItemTracker {
         else if (discrepancy != 0) { //avoid unnecessary computations
             discrepancy = discrepancy * Math.exp(-decayConstant);
         }
+        stonks.tick(discrepancy);
+        stonks.push();
     }
     /**
      * Performs a shortcut computation for the specified amount of ticks, instead of looping through
@@ -121,9 +169,17 @@ public class ItemTracker {
      * the number of time steps.
      */
     public void decayTicks(long minutes) {
-        if (decayConstant == 0) discrepancy = 0d;
-        else if (discrepancy != 0) {
-            discrepancy = discrepancy * Math.exp(-decayConstant*minutes);
+        //if skipping more than stonkDuration minutes, shortcut exceeding minutes
+        if (minutes > stonkDuration) {
+            if (decayConstant == 0) discrepancy = 0d;
+            else if (discrepancy != 0) {
+                discrepancy = discrepancy * Math.exp(-decayConstant * (minutes - stonkDuration));
+            }
+            minutes = stonkDuration;
+        }
+        //loop over the rest to actually refresh the stonk tracker/graphic
+        for (int i = 0; i < minutes; i++) {
+            decayTick(); //required to record stonks
         }
     }
 
@@ -204,7 +260,11 @@ public class ItemTracker {
         return volume == null ? BigDecimal.valueOf(Double.POSITIVE_INFINITY) : volume;
     }
 
-    public static ItemTracker fromConfiguration(Predicate<ItemStackSnapshot> filter, ConfigurationNode node) throws ObjectMappingException {
+    public Stonks getStonks() {
+        return stonks;
+    }
+
+    public static ItemTracker fromConfiguration(String filterName, ApplicabilityFilters<?> filter, ConfigurationNode node) throws ObjectMappingException {
         ItemTracker result = new ItemTracker();
         for (org.spongepowered.api.service.economy.Currency currency : TooMuchStock.getEconomy().getCurrencies()) {
             result.incomeLimit.put(currency, new BiBoundBigDecimalValue(
@@ -232,11 +292,26 @@ public class ItemTracker {
         result.dispersionDevaluation = node.getNode("dispersionDevaluation").getDouble();
 
         result.applicabilityFilter = filter;
+        result.filterName = filterName;
         return result;
     }
-
-    public ItemTracker clone() {
-        return newTracker(applicabilityFilter);
+    public void toConfiguration(ConfigurationNode node) throws ObjectMappingException {
+        for (Map.Entry<Currency, BiBoundBigDecimalValue> e : incomeLimit.entrySet()) {
+            if (e.getValue().getMax()!=null)
+                node.getNode("incomeLimit").getNode(e.getKey().getId()).setValue(TypeToken.of(BigDecimal.class), e.getValue().getMax());
+        }
+        for (Map.Entry<Currency, BiBoundBigDecimalValue> e : spendingLimit.entrySet()) {
+            if (e.getValue().getMax()!=null)
+                node.getNode("spendingLimit").getNode(e.getKey().getId()).setValue(TypeToken.of(BigDecimal.class), e.getValue().getMax());
+        }
+        if (itemBuyLimit.getMax() != null)
+            node.getNode("aggregateAmount").setValue(itemBuyLimit.getMax());
+        if (itemSellLimit.getMax() != null)
+            node.getNode("disperseAmount").setValue(itemSellLimit.getMax());
+        node.getNode("priceDecay").setValue(decayRate);
+        node.getNode("priceIncrease").setValue(growthRate);
+        node.getNode("halflife").setValue(decayConstant);
+        node.getNode("dispersionDevaluation").setValue(dispersionDevaluation);
     }
 
     @Override
@@ -244,4 +319,5 @@ public class ItemTracker {
         return "ItemTracker for " +
                 applicabilityFilter;
     }
+
 }

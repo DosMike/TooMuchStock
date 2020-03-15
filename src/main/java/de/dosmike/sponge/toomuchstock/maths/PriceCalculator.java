@@ -2,7 +2,11 @@ package de.dosmike.sponge.toomuchstock.maths;
 
 import com.google.common.collect.ImmutableList;
 import de.dosmike.sponge.toomuchstock.TooMuchStock;
+import de.dosmike.sponge.toomuchstock.service.PriceCalculationService;
+import de.dosmike.sponge.toomuchstock.service.TransactionPreview;
 import de.dosmike.sponge.toomuchstock.utils.DecayUtil;
+import ninja.leaping.configurate.ConfigurationNode;
+import ninja.leaping.configurate.objectmapping.ObjectMappingException;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.api.Sponge;
 import org.spongepowered.api.item.inventory.ItemStack;
@@ -13,7 +17,13 @@ import org.spongepowered.api.service.economy.account.UniqueAccount;
 import java.math.BigDecimal;
 import java.util.*;
 
-public class PriceCalculator {
+/**
+ * This class is not suitable as service implementation as it gets
+ * rebuilt with every config reload - unless i'd change service every time
+ * the config reloads, but I like services being provided just once (also
+ * good in case other plugins make assumptions)
+ */
+public class PriceCalculator implements PriceCalculationService {
 
     private PriceManipulator globalManip;
     private Map<UUID, PriceManipulator> shopManips = new HashMap<>();
@@ -26,6 +36,14 @@ public class PriceCalculator {
         this.globalManip = baseGlobalManip;
         this.shopBase = baseShopManip;
         this.playerBase = basePlayerManip;
+    }
+
+    public void mergeManipulators(PriceManipulator baseGlobalUpdate, PriceManipulator baseShopUpdate, PriceManipulator basePlayerUpdate) {
+        globalManip.merge(baseGlobalUpdate);
+        shopBase.merge(baseShopUpdate);
+        shopManips.values().forEach(manip->manip.merge(baseShopUpdate));
+        playerBase.merge(basePlayerUpdate);
+        playerManips.values().forEach(manip->manip.merge(basePlayerUpdate));
     }
 
     //Region builder
@@ -58,6 +76,22 @@ public class PriceCalculator {
         return new Builder();
     }
     //endregion
+
+    public void dumpBaseConfiguration(ConfigurationNode parent) throws ObjectMappingException {
+        globalManip.toConfiguration(parent.getNode("global"));
+        shopBase.toConfiguration(parent.getNode("shops"));
+        playerBase.toConfiguration(parent.getNode("player"));
+    }
+
+    public Optional<ItemTracker> getGlobalTracker(ItemStackSnapshot item) {
+        return globalManip.getIfCurrentlyTracked(item);
+    }
+    public Optional<ItemTracker> getShopTracker(UUID shop, ItemStackSnapshot item) {
+        return Optional.ofNullable(shopManips.get(shop)).flatMap(manip->manip.getIfCurrentlyTracked(item));
+    }
+    public Optional<ItemTracker> getPlayerTracker(UUID player, ItemStackSnapshot item) {
+        return Optional.ofNullable(playerManips.get(player)).flatMap(manip->manip.getIfCurrentlyTracked(item));
+    }
 
     public Result getPurchaseInformation(ItemStack item, int amount, BigDecimal staticPrice, Currency currency, @Nullable UUID shopID, @Nullable UUID playerID) {
         return getPurchaseInformation(item.createSnapshot(), amount, staticPrice, currency, shopID, playerID);
@@ -153,7 +187,7 @@ public class PriceCalculator {
     }
 
 
-    public static class Result {
+    public static class Result implements TransactionPreview {
         ItemTracker global;
         ItemTracker shop;
         ItemTracker player;

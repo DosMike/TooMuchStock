@@ -1,9 +1,11 @@
 package de.dosmike.sponge.toomuchstock.utils;
 
 import org.spongepowered.api.Sponge;
+import org.spongepowered.api.data.DataContainer;
 import org.spongepowered.api.data.DataQuery;
 import org.spongepowered.api.data.key.Keys;
 import org.spongepowered.api.item.ItemType;
+import org.spongepowered.api.item.inventory.ItemStack;
 import org.spongepowered.api.item.inventory.ItemStackSnapshot;
 
 import java.util.Optional;
@@ -100,6 +102,17 @@ public class ItemTypeEx {
                 sb.append(meta);
         }
         return sb.toString();
+    }
+
+    public ItemStackSnapshot getTemplate() {
+        if (meta == META_IGNORE)
+            return itemType.getTemplate();
+
+        DataContainer container = itemType.getTemplate().toContainer();
+        container.set(dqDamageMeta, meta);
+        return ItemStack.builder()
+                .fromContainer(container)
+                .build().createSnapshot();
     }
 
 }
