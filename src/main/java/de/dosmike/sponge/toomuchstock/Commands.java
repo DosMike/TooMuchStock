@@ -165,7 +165,7 @@ public class Commands {
         Sponge.getCommandManager().register(instance, CommandSpec.builder()
                 .child(subcmdRegisterItem(), "define", "register")
                 .child(subcmdReload(), "reload")
-                .child(subcmdReload(), "history", "stonks")
+                .child(subcmdStonks(), "history", "stonks")
                 .build(), "toomuchstock", "tms");
     }
 

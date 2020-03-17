@@ -27,6 +27,16 @@ but the prices still scale with demand and supply!
 * Create Item aliases through a command, for use in per item configurations
 * Visuall display global price history and player specific price history per item
 
+## Commands & Permissions
+
+* `/toomuchstock reload [--hard]` (Permission: toomuchstock.command.reload)  
+  Reload the config. If --hard is specified, will also reset cooldowns.
+* `/toomuchstock define <filter> <name>` (Permission: toomuchstock.command.define)  
+  Hold an item to add it to the config under the specified name for per item configuration
+* `/toomuchstock history [item]` (Permission: toomuchstock.command.stonks)  
+  Hold an item or type the item name in the command to get a visual history of the item
+  price (as multiplier to a base price) over the last 30 minutes.
+
 ## Example config
 
 An example configuration with comments can be found [here](https://github.com/DosMike/TooMuchStock/blob/master/example.conf).
