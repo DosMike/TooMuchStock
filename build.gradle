@@ -105,21 +105,24 @@ task rebuild(group:'_Plugin') {
     finalizedBy uberJar
 }
 task zPublish(type: Exec, group:'_Plugin', dependsOn:uberJar) {
-    file('..\\PluginPublisher\\.apikeys').readLines().each() {
-        def (key, value) = it.tokenize('=')
-        environment key, value
+    def keyfile = file('..\\PluginPublisher\\.apikeys')
+    if (keyfile.exists()) {
+        keyfile.readLines().each() {
+            def (key, value) = it.tokenize('=')
+            environment key, value
+        }
+        def spp_git_slug = 'DosMike/TooMuchStock'
+        def spp_discord_server = '342942444288999435'
+        def spp_discord_channel = '618485610990272520'
+        def spp_discord_mention = '<@&644227606048145467>'
+        def spp_discord_header = "${spp_discord_mention} Version ${version} released on Ore and GitHub"
+        def outputFile = "build\\libs\\${jar.archiveName}"
+        commandLine 'java', '-jar', '..\\PluginPublisher\\PluginPublisher.jar',
+                '--gk', 'gitkey', /*'--ok', 'orekey',*/ '--dk', 'discordkey',
+                '--gs', spp_git_slug, '--gt', version, '--gn', "Development Build ${version}", '--ga', outputFile,
+                /*'--op', pluginid, '--oa', outputFile,*/
+                '--ds', spp_discord_server, '--dc', spp_discord_channel, '--dh', spp_discord_header
     }
-    def spp_git_slug='DosMike/TooMuchStock'
-    def spp_discord_server='342942444288999435'
-    def spp_discord_channel='618485610990272520'
-    def spp_discord_mention='<@&644227606048145467>'
-    def spp_discord_header="${spp_discord_mention} Version ${version} released on Ore and GitHub"
-    def outputFile = "build\\libs\\${jar.archiveName}"
-    commandLine 'java', '-jar', '..\\PluginPublisher\\PluginPublisher.jar',
-            '--gk', 'gitkey', /*'--ok', 'orekey',*/ '--dk', 'discordkey',
-            '--gs', spp_git_slug, '--gt', version, '--gn', "Development Build ${version}", '--ga', outputFile,
-            /*'--op', pluginid, '--oa', outputFile,*/
-            '--ds', spp_discord_server, '--dc', spp_discord_channel, '--dh', spp_discord_header
 }
 
 //for generating the jar
