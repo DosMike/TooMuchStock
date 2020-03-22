@@ -69,3 +69,16 @@ PriceChangeEvent will be emitted for plugins to update their dispalys.
 
 /* Note: I'll add an example on how to optionally use this plugin, 
 so you do not have to depend on it */
+
+**As Dependency**
+
+```
+repositories {
+	...
+	maven { url 'https://jitpack.io' }
+}
+
+dependencies {
+	implementation 'com.github.DosMike:TooMuchStock:master-SNAPSHOT'
+}
+```
