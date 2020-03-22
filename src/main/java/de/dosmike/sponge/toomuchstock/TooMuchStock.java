@@ -33,7 +33,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
 
-@Plugin(id = "toomuchstock", name = "Too Much Stock", version = "1.0-alpha-1")
+@Plugin(id = "toomuchstock", name = "Too Much Stock", version = "1.0-alpha-2")
 public class TooMuchStock {
 
     private static TooMuchStock instance;
