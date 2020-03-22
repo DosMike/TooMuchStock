@@ -5,6 +5,7 @@ import de.dosmike.sponge.toomuchstock.TooMuchStock;
 import de.dosmike.sponge.toomuchstock.service.PriceCalculationService;
 import de.dosmike.sponge.toomuchstock.service.TransactionPreview;
 import de.dosmike.sponge.toomuchstock.utils.DecayUtil;
+import de.dosmike.sponge.toomuchstock.utils.VMath;
 import ninja.leaping.configurate.ConfigurationNode;
 import ninja.leaping.configurate.objectmapping.ObjectMappingException;
 import org.jetbrains.annotations.Nullable;
@@ -200,6 +201,7 @@ public class PriceCalculator implements PriceCalculationService {
         /** the value of &lt;index&gt; items */
         List<BigDecimal> nItemValue;
         int canAfford; //check the player balance, shop eco limits and shop amount limits
+        int limitAccount, limitCurrency, limitItems;
         /**
          * @param purchase if the player purchases items -> price will grow
          * @param playerBalance if selling this value should be the remaining capacity in the players account or NULL
@@ -215,6 +217,9 @@ public class PriceCalculator implements PriceCalculationService {
             this.playerBalance = playerBalance;
             nItemValue = new ArrayList<>(amount+1);
             canAfford = purchase ? 0 : Integer.MAX_VALUE;
+            limitAccount = purchase ? 0 : Integer.MAX_VALUE;
+            limitCurrency = purchase ? 0 : Integer.MAX_VALUE;
+            limitItems = purchase ? 0 : Integer.MAX_VALUE;
             Collections.fill(nItemValue, BigDecimal.ZERO); //can't be empty for update()
             update();
         }
@@ -225,17 +230,16 @@ public class PriceCalculator implements PriceCalculationService {
             // max value is minimum available value over all trackers
             BigDecimal maxValue;
             // max amount is minimum available amount over all trackers
-            int maxAmount;
             scales = multiply(scales, purchase
                     ? DecayUtil.createGrowthMultiplicationVector(global.peek(), global.getGrowthRate(), amount)
                     : DecayUtil.createDecayMultiplicationVector(global.peek(), global.getDecayRate(), amount)
             );
             if (purchase) {
                 maxValue = global.getPurchaseValueCapacity(currency);
-                maxAmount = global.getPurchaseItemCapacity();
+                limitItems = global.getPurchaseItemCapacity();
             } else {
                 maxValue = global.getDistributeValueCapacity(currency);
-                maxAmount = global.getDistributeItemCapacity();
+                limitItems = global.getDistributeItemCapacity();
             }
             if (shop != null) {
                 scales = multiply(scales, purchase
@@ -246,12 +250,12 @@ public class PriceCalculator implements PriceCalculationService {
                     BigDecimal cap = shop.getPurchaseValueCapacity(currency);
                     if (cap.compareTo(maxValue)<0) maxValue = cap;
                     int cnt = shop.getPurchaseItemCapacity();
-                    if (cnt < maxAmount) maxAmount = cnt;
+                    if (cnt < limitItems) limitItems = cnt;
                 } else {
                     BigDecimal cap = shop.getDistributeValueCapacity(currency);
                     if (cap.compareTo(maxValue)<0) maxValue = cap;
                     int cnt = shop.getDistributeItemCapacity();
-                    if (cnt < maxAmount) maxAmount = cnt;
+                    if (cnt < limitItems) limitItems = cnt;
                 }
             }
             if (player != null) {
@@ -263,12 +267,12 @@ public class PriceCalculator implements PriceCalculationService {
                     BigDecimal cap = player.getPurchaseValueCapacity(currency);
                     if (cap.compareTo(maxValue)<0) maxValue = cap;
                     int cnt = player.getPurchaseItemCapacity();
-                    if (cnt < maxAmount) maxAmount = cnt;
+                    if (cnt < limitItems) limitItems = cnt;
                 } else {
                     BigDecimal cap = player.getDistributeValueCapacity(currency);
                     if (cap.compareTo(maxValue)<0) maxValue = cap;
                     int cnt = player.getDistributeItemCapacity();
-                    if (cnt < maxAmount) maxAmount = cnt;
+                    if (cnt < limitItems) limitItems = cnt;
                 }
             }
             BigDecimal thisValue;
@@ -276,18 +280,23 @@ public class PriceCalculator implements PriceCalculationService {
                 thisValue = staticPrice.multiply(BigDecimal.valueOf(scales.get(i-1))); //price of 1 item is static price * multiplier after 0 iterations
                 nItemValue.set(i, thisValue);
                 if (purchase) {
-                    if ((playerBalance == null || playerBalance.compareTo(thisValue) >= 0) &&
-                        amount <= maxAmount && thisValue.compareTo(maxValue) <= 0) {
-                        canAfford = i;
+                    if ((playerBalance == null || playerBalance.compareTo(thisValue) >= 0)) {
+                        limitAccount = i;
+                    }
+                    if (thisValue.compareTo(maxValue) <= 0) {
+                        limitCurrency = i;
                     }
                 } else {
                     //this value still fits in the player remaining account capacity
-                    if ((playerBalance == null || thisValue.compareTo(playerBalance)<=0) &&
-                        amount <= maxAmount && thisValue.compareTo(maxValue) <= 0) {
-                        canAfford = i;
+                    if ((playerBalance == null || thisValue.compareTo(playerBalance)<=0)) {
+                        limitAccount = i;
+                    }
+                    if (thisValue.compareTo(maxValue) <= 0) {
+                        limitCurrency = i;
                     }
                 }
             }
+            canAfford = VMath.min(limitAccount, limitItems, limitCurrency, amount);
         }
         private static List<Double> multiply(List<Double> a, List<Double> b) {
             List<Double> elemsum = new ArrayList<>(a.size());
@@ -330,6 +339,21 @@ public class PriceCalculator implements PriceCalculationService {
                 if (player != null) player.decay(amount);
             }
             Sponge.getEventManager().post(new PriceUpdateEvent(item));
+        }
+
+        @Override
+        public int getLimitAccount() {
+            return limitAccount;
+        }
+
+        @Override
+        public int getLimitItemTransactions() {
+            return limitItems;
+        }
+
+        @Override
+        public int getLimitCurrencyTransactions() {
+            return limitCurrency;
         }
     }
 

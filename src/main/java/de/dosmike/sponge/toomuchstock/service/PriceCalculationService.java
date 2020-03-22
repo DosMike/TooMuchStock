@@ -8,6 +8,7 @@ import org.spongepowered.api.service.economy.Currency;
 import java.math.BigDecimal;
 import java.util.UUID;
 
+@SuppressWarnings("unused")
 public interface PriceCalculationService {
 
     /**
