@@ -18,6 +18,12 @@ import java.util.regex.Pattern;
  */
 public class PriceManipulator {
 
+    //I can't type for shit, these help prevent typos
+    public static final String KEY_RESET = "reset", KEY_DEFAULT = "default",
+            KEY_GLOBAL = "global", KEY_SHOPS = "shops", KEY_PLAYERS = "players",
+            KEY_INCOME = "incomeLimit", KEY_SPENDING = "spendingLimit",
+            KEY_DEFAULT_CURRENCY = "defcur";
+
     /**
      * Stores the config value for reset time as interval in minutes.
      * Will be null if the reset time is a time of day.
@@ -105,7 +111,7 @@ public class PriceManipulator {
     /**
      * Performs the think transformations for the specified amount of time without repeatedly calling think.
      * This will bring all item trackers in this manipulator back to date. This allows unloading data for players
-     * that are offline. Shop and global manipulators should not call this!
+     * that are offline. Shop and global manipulators probably should not call this!
      * @param from the last calculated time in ms
      */
     public void bigBrainTime(long from) {
@@ -144,6 +150,11 @@ public class PriceManipulator {
         for (ItemTracker t : trackers) t.decayTicks(minutes);
     }
 
+    /** delete all ItemTrackers that are currently "idle", meaning they have a discrepancy of 0 */
+    public void cleanUp() {
+        trackers.removeIf(tracker->Math.abs(tracker.peek()-1.0)<=Math.ulp(1.0));
+    }
+
     protected PriceManipulator clone()  {
         PriceManipulator clone = new PriceManipulator();
         clone.resetTimePoint = this.resetTimePoint;
@@ -175,7 +186,7 @@ public class PriceManipulator {
         PriceManipulator manipulator = new PriceManipulator();
         for (Map.Entry<Object, ? extends ConfigurationNode> entry : node.getChildrenMap().entrySet()) {
             String key = entry.getKey().toString();
-            if ("reset".equalsIgnoreCase(key)) {
+            if (KEY_RESET.equalsIgnoreCase(key)) {
                 manipulator.hasResetTime = true;
                 String value = entry.getValue().getString();
                 try {
@@ -197,8 +208,8 @@ public class PriceManipulator {
                 }
 
             // key can be item type, item type + meta or name for named map of "default"
-            } else if ("default".equalsIgnoreCase(key)) {
-                manipulator.defaultTrackerConfiguration = ItemTracker.fromConfiguration("default", ApplicabilityFilters.pass, entry.getValue());
+            } else if (KEY_DEFAULT.equalsIgnoreCase(key)) {
+                manipulator.defaultTrackerConfiguration = ItemTracker.fromConfiguration(KEY_DEFAULT, ApplicabilityFilters.pass, entry.getValue());
             } else {
                 ApplicabilityFilters<?> filter;
                 filter = TooMuchStock.getItemDefinitionTable().getOrDefault(key, ApplicabilityFilters.generateItemTypeMetaEquals(new ItemTypeEx(key)));
@@ -207,7 +218,7 @@ public class PriceManipulator {
             }
         }
         if (manipulator.defaultTrackerConfiguration == null) {
-            throw new ObjectMappingException("Missing 'default' configuration value");
+            throw new ObjectMappingException("Missing '"+KEY_DEFAULT+"' configuration value");
         }
         return manipulator;
     }
@@ -217,14 +228,14 @@ public class PriceManipulator {
             if (!tracker.derived)
                 tracker.toConfiguration(parent.getNode(tracker.getApplicabilityFilterName()));
         }
-        defaultTrackerConfiguration.toConfiguration(parent.getNode("default"));
+        defaultTrackerConfiguration.toConfiguration(parent.getNode(KEY_DEFAULT));
         if (hasResetTime) {
             if (resetTimeInterval != null) {
-                parent.getNode("reset").setValue(resetTimeInterval);
+                parent.getNode(KEY_RESET).setValue(resetTimeInterval);
             } else if (resetTimePoint != null) {
                 Calendar cal = new GregorianCalendar();
                 cal.setTime(resetTimePoint);
-                parent.getNode("reset").setValue(String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)));
+                parent.getNode(KEY_RESET).setValue(String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)));
             }
         }
     }

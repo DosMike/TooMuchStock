@@ -52,7 +52,9 @@ public class DecayUtil {
     }
 
     /** basic exponential growth formula y = a*(1+r)^x
-     * the growth rate as percentage is 1+r */
+     * the growth rate as percentage is 1+r
+     * @return the value AFTER the iterations
+     */
     public static double exponentialGrowth(double initialValue, double growthRate, int iterations) {
         if (iterations < 0) throw new IllegalArgumentException("Amount can't be negative");
         if (iterations == 0) return initialValue;
@@ -60,7 +62,9 @@ public class DecayUtil {
         return initialValue * Math.pow(1+growthRate, iterations);
     }
     /** basic exponential decay formula y = a*(1-r)^x
-     * the decay rate as percentage is 1-r */
+     * the decay rate as percentage is 1-r
+     * @return the value AFTER the iterations
+     */
     public static double exponentialDecay(double initialValue, double decayRate, int iterations) {
         if (iterations < 0) throw new IllegalArgumentException("Amount can't be negative");
         if (iterations == 0) return initialValue;
@@ -70,11 +74,13 @@ public class DecayUtil {
     /** calculates the exponential growth with a for loop, returning every value after n iterations as position in the
      * list. This might be useful in cases where you don't know the exact amount of iterations, so you can search the
      * iteration count by stepping though result values
+     * @return multipliers AFTER index iterations
      */
     public static List<Double> createGrowthMultiplicationVector(double initialValue, double growthRate, int iterations) {
         List<Double> result = new ArrayList<>(iterations+1);
         result.add(initialValue);
         double currentValue = initialValue;
+        growthRate = 1+growthRate;
         for (int i = 1; i <= iterations; i++) {
             currentValue *= growthRate;
             result.add(currentValue);
@@ -84,13 +90,15 @@ public class DecayUtil {
     /** calculates the exponential decay with a for loop, returning every value after n iterations as position in the
      * list. This might be useful in cases where you don't know the exact amount of iterations, so you can search the
      * iteration count by stepping though result values
+     * @return multipliers AFTER index iterations
      */
-    public static List<Double> createDecayMultiplicationVector(double initialValue, double growthRate, int iterations) {
+    public static List<Double> createDecayMultiplicationVector(double initialValue, double decayRate, int iterations) {
         List<Double> result = new ArrayList<>(iterations+1);
         result.add(initialValue);
         double currentValue = initialValue;
+        decayRate = 1+decayRate;
         for (int i = 1; i <= iterations; i++) {
-            currentValue /= growthRate;
+            currentValue /= decayRate;
             result.add(currentValue);
         }
         return result;

@@ -117,7 +117,11 @@ public class Commands {
                                 throw new CommandException(Text.of(TextColors.RED, "No item definition for ", TextColors.RESET, s));
                             item = filter.generateTemplate().orElseThrow(()->new CommandException(Text.of(TextColors.RED, "Definition does not provide item")));
                         } else {
-                            item = new ItemTypeEx(s).getTemplate();
+                            try {
+                                item = new ItemTypeEx(s).getTemplate();
+                            } catch (IllegalArgumentException e) {
+                                throw new CommandException(Text.of(e.getMessage()));
+                            }
                         }
                         name = s;
                     } else if (src instanceof Player) {

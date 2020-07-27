@@ -15,8 +15,10 @@ import ninja.leaping.configurate.objectmapping.ObjectMappingException;
 import org.slf4j.Logger;
 import org.spongepowered.api.Sponge;
 import org.spongepowered.api.command.CommandSource;
+import org.spongepowered.api.config.ConfigDir;
 import org.spongepowered.api.config.DefaultConfig;
 import org.spongepowered.api.event.Listener;
+import org.spongepowered.api.event.Order;
 import org.spongepowered.api.event.game.GameReloadEvent;
 import org.spongepowered.api.event.game.state.GameInitializationEvent;
 import org.spongepowered.api.event.game.state.GamePostInitializationEvent;
@@ -30,8 +32,10 @@ import org.spongepowered.api.text.Text;
 import org.spongepowered.api.text.format.TextColors;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @Plugin(id = "toomuchstock", name = "Too Much Stock", version = "1.0-alpha-2")
 public class TooMuchStock {
@@ -61,6 +65,7 @@ public class TooMuchStock {
         return instance.itemDefinitions;
     }
     public static PriceCalculator getPriceCalculator() { return instance.priceCalculator; }
+    public static Path getCacheDirectory() { return instance.configPath.resolve("cache"); }
 
     PluginContainer getContainer() {
         return Sponge.getPluginManager().fromInstance(this).orElseThrow(()->new InternalError("No plugin container for self returned"));
@@ -81,7 +86,11 @@ public class TooMuchStock {
     @DefaultConfig(sharedRoot = false)
     private ConfigurationLoader<CommentedConfigurationNode> configManager;
 
-    @Listener
+    @Inject
+    @ConfigDir(sharedRoot = false)
+    private Path configPath;
+
+    @Listener(order=Order.LATE) //order late to have economy (hopefully) load before, because we need the default currency
     public void onServerPreInit(GamePreInitializationEvent event) {
         instance = this;
         syncScheduler = Sponge.getScheduler().createSyncExecutor(this);
@@ -97,6 +106,8 @@ public class TooMuchStock {
         // service should already be going in here
         l("Registering commands...");
         Commands.register(this);
+
+        syncScheduler.scheduleAtFixedRate(()->priceCalculator.thinkTick(), 1, 1, TimeUnit.MINUTES);
     }
 
     @Listener
@@ -120,23 +131,26 @@ public class TooMuchStock {
         HoconConfigurationLoader defaultLoader = HoconConfigurationLoader.builder().setURL(Sponge.getAssetManager().getAsset(instance, "default.conf").get().getUrl()).build();
         CommentedConfigurationNode defaultRoot = null;
         CommentedConfigurationNode config = null;
+
         try {
             defaultRoot = defaultLoader.load(ConfigurationOptions.defaults());
             //inject default currency into nodes. this makes the default config more reliable for
             //people that want to use this plugin out of the box
             for (String[] path : Arrays.asList(
-                    new String[]{"global", "default", "incomeLimit"},
-                    new String[]{"global", "default", "spendingLimit"},
-                    new String[]{"shops", "default", "incomeLimit"},
-                    new String[]{"shops", "default", "spendingLimit"},
-                    new String[]{"players", "default", "incomeLimit"},
-                    new String[]{"players", "default", "spendingLimit"}
+                    new String[]{PriceManipulator.KEY_GLOBAL,  PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_INCOME},
+                    new String[]{PriceManipulator.KEY_GLOBAL,  PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_SPENDING},
+                    new String[]{PriceManipulator.KEY_SHOPS,   PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_INCOME},
+                    new String[]{PriceManipulator.KEY_SHOPS,   PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_SPENDING},
+                    new String[]{PriceManipulator.KEY_PLAYERS, PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_INCOME},
+                    new String[]{PriceManipulator.KEY_PLAYERS, PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_SPENDING}
             )) {
                 // cast is not redundant (you'll see if you remove it)
                 ConfigurationNode node = defaultRoot.getNode((Object[])path);
-                Object value = node.getNode("defcur").getValue();
-                node.removeChild("defcur");
-                node.getNode(getEconomy().getDefaultCurrency().getId()).setValue(value);
+                if (!node.getNode(PriceManipulator.KEY_DEFAULT_CURRENCY).isVirtual()) { // convert "defcur" into the actual default currency
+                    Object value = node.getNode(PriceManipulator.KEY_DEFAULT_CURRENCY).getValue();
+                    node.removeChild(PriceManipulator.KEY_DEFAULT_CURRENCY);
+                    node.getNode(getEconomy().getDefaultCurrency().getId()).setValue(value);
+                }
             }
         } catch (Exception e) { //should always load
             e.printStackTrace();
@@ -151,10 +165,10 @@ public class TooMuchStock {
             }
             itemDefinitions = definitions;
 
-            PriceManipulator globalManipulatorBase = PriceManipulator.fromConfiguration(config.getNode("global"));
-            PriceManipulator shopManipulatorBase = PriceManipulator.fromConfiguration(config.getNode("shops"));
-            PriceManipulator playerManipulatorBase = PriceManipulator.fromConfiguration(config.getNode("player"));
-            if (hard) {
+            PriceManipulator globalManipulatorBase = PriceManipulator.fromConfiguration(config.getNode(PriceManipulator.KEY_GLOBAL));
+            PriceManipulator shopManipulatorBase = PriceManipulator.fromConfiguration(config.getNode(PriceManipulator.KEY_SHOPS));
+            PriceManipulator playerManipulatorBase = PriceManipulator.fromConfiguration(config.getNode(PriceManipulator.KEY_PLAYERS));
+            if (hard || priceCalculator==null) {
                 priceCalculator = PriceCalculator.builder()
                         .setGlobalManipulatorTemplate(globalManipulatorBase)
                         .setShopsManipulatorTemplate(shopManipulatorBase)
@@ -171,6 +185,7 @@ public class TooMuchStock {
             Sponge.getServer().getBroadcastChannel().send(Text.of(TextColors.YELLOW,
                 String.format("Could not load config: %s", e.getMessage())
             ));
+            e.printStackTrace();
         } finally {
             try {
                 assert config != null; //make ide happy

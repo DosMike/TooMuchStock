@@ -1,7 +1,7 @@
 [{
   "modid": "toomuchstock",
   "name": "TooMuchStock",
-  "description": "Play Minesweeper in a inventory",
+  "description": "Dynamic pricing API",
   "version": "1.0-alpha-2",
   "url": "",
   "authorList": [ "DosMike" ],

@@ -16,7 +16,7 @@ import java.util.function.Predicate;
 
 public class ItemTracker {
 
-    private static final int stonkDuration = 30; //minutes
+    private static final int stonkDuration = 25; //minutes
     private Stonks stonks = new Stonks(stonkDuration);
 
     /** Checks whether the supplied item stack will be affected by this tracker */
@@ -64,7 +64,9 @@ public class ItemTracker {
      * required to calculate N(t+1) = N(t) * e ^ (-lambda * 1).
      * From the half-life the decay constant is calculated as lambda = ln(2) / halfLife
      */
-    private long decayConstant;
+    private double decayConstant;
+    /** Configuration value */
+    private long halfLife;
 
     /**
      * In order to keep resales at bay the dispersion devaluation is a factor [1..0]
@@ -155,12 +157,19 @@ public class ItemTracker {
      * pre-calculated.
      */
     public void decayTick() {
-        if (decayConstant == 0) discrepancy = 0d;
-        else if (discrepancy != 0) { //avoid unnecessary computations
+        // finalize old value
+        stonks.update(discrepancy);
+        stonks.push();
+        //decay discrepancy
+        if (decayConstant == 0)
+        {/* don't decay */}
+        else if (Math.abs(discrepancy) > Double.MIN_VALUE) { //avoid unnecessary computations
             discrepancy = discrepancy * Math.exp(-decayConstant);
         }
-        stonks.tick(discrepancy);
-        stonks.push();
+        else
+            discrepancy = 0d; // make it absolute 0, no uncertainty
+        //update new value
+        stonks.update(discrepancy);
     }
     /**
      * Performs a shortcut computation for the specified amount of ticks, instead of looping through
@@ -169,13 +178,16 @@ public class ItemTracker {
      * the number of time steps.
      */
     public void decayTicks(long minutes) {
-        //if skipping more than stonkDuration minutes, shortcut exceeding minutes
-        if (minutes > stonkDuration) {
-            if (decayConstant == 0) discrepancy = 0d;
-            else if (discrepancy != 0) {
-                discrepancy = discrepancy * Math.exp(-decayConstant * (minutes - stonkDuration));
+        //we can fast forward all values that do not get recorded into the visualization
+        int reffedValueCount = stonkDuration+1; //because the last value still shows delta value
+        if (minutes > reffedValueCount+1) { //skip atleast 2 values, otherwise just push
+            long doForward = minutes-reffedValueCount;
+            if (decayConstant == 0) {/* don't decay */}
+            else if (Math.abs(discrepancy) > Double.MIN_VALUE) {
+                discrepancy = discrepancy * Math.exp(-decayConstant * (minutes - doForward));
             }
-            minutes = stonkDuration;
+            if (Math.abs(discrepancy) <= Double.MIN_VALUE) discrepancy = 0;
+            minutes -= doForward;
         }
         //loop over the rest to actually refresh the stonk tracker/graphic
         for (int i = 0; i < minutes; i++) {
@@ -188,6 +200,7 @@ public class ItemTracker {
      */
     public void reset() {
         discrepancy = 0d;
+        stonks = new Stonks(stonkDuration);
     }
 
     /**
@@ -215,6 +228,7 @@ public class ItemTracker {
     public double decay(int amount) {
         double multiplier = 1.0+discrepancy;
         discrepancy = DecayUtil.exponentialDecay(multiplier, decayRate, amount)-1.0;
+        stonks.update(discrepancy);
         return multiplier;
     }
     /**
@@ -225,6 +239,7 @@ public class ItemTracker {
     public double grow(int amount) {
         double multiplier = 1.0+discrepancy;
         discrepancy = DecayUtil.exponentialGrowth(multiplier, growthRate, amount)-1.0;
+        stonks.update(discrepancy);
         return multiplier;
     }
 
@@ -249,15 +264,15 @@ public class ItemTracker {
     }
     /** @return how much money worth of this item is still purchasable within this tracker */
     public BigDecimal getPurchaseValueCapacity(Currency currency) {
-        if (!spendingLimit.containsKey(currency)) return BigDecimal.valueOf(Double.POSITIVE_INFINITY); //unregulated
+        if (!spendingLimit.containsKey(currency)) return BigDecimal.valueOf(Integer.MAX_VALUE); //unregulated
         BigDecimal volume = spendingLimit.get(currency).getIncreaseVolume();
-        return volume == null ? BigDecimal.valueOf(Double.POSITIVE_INFINITY) : volume;
+        return volume == null ? BigDecimal.valueOf(Integer.MAX_VALUE) : volume;
     }
     /** @return how much money worth of this item is still distributable within this tracker */
     public BigDecimal getDistributeValueCapacity(Currency currency) {
-        if (!incomeLimit.containsKey(currency)) return BigDecimal.valueOf(Double.POSITIVE_INFINITY); //unregulated
+        if (!incomeLimit.containsKey(currency)) return BigDecimal.valueOf(Integer.MAX_VALUE); //unregulated
         BigDecimal volume = incomeLimit.get(currency).getIncreaseVolume();
-        return volume == null ? BigDecimal.valueOf(Double.POSITIVE_INFINITY) : volume;
+        return volume == null ? BigDecimal.valueOf(Integer.MAX_VALUE) : volume;
     }
 
     public Stonks getStonks() {
@@ -288,7 +303,9 @@ public class ItemTracker {
         );
         result.decayRate = node.getNode("priceDecay").getDouble();
         result.growthRate = node.getNode("priceIncrease").getDouble();
-        result.decayConstant = node.getNode("halflife").getInt();
+        result.halfLife = node.getNode("halflife").getInt();
+        if (result.halfLife>0)
+            result.decayConstant = Math.log(2)/result.halfLife;
         result.dispersionDevaluation = node.getNode("dispersionDevaluation").getDouble();
 
         result.applicabilityFilter = filter;
@@ -310,7 +327,7 @@ public class ItemTracker {
             node.getNode("disperseAmount").setValue(itemSellLimit.getMax());
         node.getNode("priceDecay").setValue(decayRate);
         node.getNode("priceIncrease").setValue(growthRate);
-        node.getNode("halflife").setValue(decayConstant);
+        node.getNode("halflife").setValue(halfLife);
         node.getNode("dispersionDevaluation").setValue(dispersionDevaluation);
     }
 
