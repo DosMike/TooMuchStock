@@ -88,9 +88,19 @@ public class PriceCalculator implements PriceCalculationService {
 
     //expected to be called once a minute
     public void thinkTick() {
+        Set<UUID> staleShopManips = new HashSet<>();
+        Set<UUID> stalePlayerManips = new HashSet<>();
         globalManip.think();
-        shopManips.values().forEach(PriceManipulator::think);
-        playerManips.values().forEach(PriceManipulator::think);
+        for (Map.Entry<UUID, PriceManipulator> e : shopManips.entrySet()) {
+            e.getValue().think();
+            if (e.getValue().isIdle()) staleShopManips.add(e.getKey());
+        }
+        for (Map.Entry<UUID, PriceManipulator> e : playerManips.entrySet()) {
+            e.getValue().think();
+            if (e.getValue().isIdle()) stalePlayerManips.add(e.getKey());
+        }
+        for (UUID id : staleShopManips) shopManips.remove(id);
+        for (UUID id : stalePlayerManips) playerManips.remove(id);
     }
 
     public void dumpBaseConfiguration(ConfigurationNode parent) throws ObjectMappingException {
@@ -377,51 +387,51 @@ public class PriceCalculator implements PriceCalculationService {
         return elemsum;
     }
 
-    public void unloadPlayerState(UUID player) {
-        PriceManipulator manipulator = playerManips.remove(player);
-        if (manipulator==null) return;
-        manipulator.cleanUp();
-        try {
-            Path playerCache = TooMuchStock.getCacheDirectory()
-                    .resolve("players");
-            Files.createDirectories(playerCache);
-            playerCache = playerCache.resolve(player.toString().replace("-", "")+".bin");
-
-            HoconConfigurationLoader loader = HoconConfigurationLoader.builder()
-                    .setPath(playerCache)
-                    .build();
-            CommentedConfigurationNode node = loader.createEmptyNode();
-            manipulator.toConfiguration(node);
-            node.getNode("StateTime").setValue(System.currentTimeMillis());
-            loader.save(node);
-        } catch (Throwable t) {
-            TooMuchStock.w("Could not dump player state for %s", player.toString());
-            t.printStackTrace();
-        }
-    }
-    public void loadPlayerState(UUID player) {
-        try {
-            Path playerCache = TooMuchStock.getCacheDirectory()
-                    .resolve("players")
-                    .resolve(player.toString().replace("-", "")+".bin");
-            if (!Files.exists(playerCache)) return; //nothing caches
-
-            HoconConfigurationLoader loader = HoconConfigurationLoader.builder()
-                    .setPath(playerCache)
-                    .build();
-            CommentedConfigurationNode node = loader.load();
-            PriceManipulator manipulator = PriceManipulator.fromConfiguration(node);
-            long stateTime = node.getNode("StateTime").getLong();
-            loader.save(node);
-            //patch in new base tracker values
-            manipulator.merge(playerBase);
-            manipulator.bigBrainTime(stateTime);
-            manipulator.cleanUp();
-            playerManips.put(player, manipulator);
-        } catch (Throwable t) {
-            TooMuchStock.w("Could not read cached player state for %s. State is reset", player.toString());
-            t.printStackTrace();
-        }
-    }
+//    public void unloadPlayerState(UUID player) {
+//        PriceManipulator manipulator = playerManips.remove(player);
+//        if (manipulator==null) return;
+//        manipulator.cleanUp();
+//        try {
+//            Path playerCache = TooMuchStock.getCacheDirectory()
+//                    .resolve("players");
+//            Files.createDirectories(playerCache);
+//            playerCache = playerCache.resolve(player.toString().replace("-", "")+".bin");
+//
+//            HoconConfigurationLoader loader = HoconConfigurationLoader.builder()
+//                    .setPath(playerCache)
+//                    .build();
+//            CommentedConfigurationNode node = loader.createEmptyNode();
+//            manipulator.toConfiguration(node);
+//            node.getNode("StateTime").setValue(System.currentTimeMillis());
+//            loader.save(node);
+//        } catch (Throwable t) {
+//            TooMuchStock.w("Could not dump player state for %s", player.toString());
+//            t.printStackTrace();
+//        }
+//    }
+//    public void loadPlayerState(UUID player) {
+//        try {
+//            Path playerCache = TooMuchStock.getCacheDirectory()
+//                    .resolve("players")
+//                    .resolve(player.toString().replace("-", "")+".bin");
+//            if (!Files.exists(playerCache)) return; //nothing caches
+//
+//            HoconConfigurationLoader loader = HoconConfigurationLoader.builder()
+//                    .setPath(playerCache)
+//                    .build();
+//            CommentedConfigurationNode node = loader.load();
+//            PriceManipulator manipulator = PriceManipulator.fromConfiguration(node);
+//            long stateTime = node.getNode("StateTime").getLong();
+//            loader.save(node);
+//            //patch in new base tracker values
+//            manipulator.merge(playerBase);
+//            manipulator.bigBrainTime(stateTime);
+//            manipulator.cleanUp();
+//            playerManips.put(player, manipulator);
+//        } catch (Throwable t) {
+//            TooMuchStock.w("Could not read cached player state for %s. State is reset", player.toString());
+//            t.printStackTrace();
+//        }
+//    }
 
 }

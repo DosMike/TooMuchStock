@@ -81,6 +81,10 @@ public class PriceManipulator {
         }
         return Optional.empty();
     }
+    /** @return true if the number of tracked items is 0 */
+    public boolean isIdle() {
+        return trackers.isEmpty();
+    }
 
     /**
      * To be called once a minute. Will reset the Trackers when the
@@ -152,7 +156,7 @@ public class PriceManipulator {
 
     /** delete all ItemTrackers that are currently "idle", meaning they have a discrepancy of 0 */
     public void cleanUp() {
-        trackers.removeIf(tracker->Math.abs(tracker.peek()-1.0)<=Math.ulp(1.0));
+        trackers.removeIf(ItemTracker::isIdle);
     }
 
     protected PriceManipulator clone()  {

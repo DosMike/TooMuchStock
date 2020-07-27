@@ -37,7 +37,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-@Plugin(id = "toomuchstock", name = "Too Much Stock", version = "1.0-alpha-2")
+@Plugin(id = "toomuchstock", name = "Too Much Stock", version = "1.0")
 public class TooMuchStock {
 
     private static TooMuchStock instance;

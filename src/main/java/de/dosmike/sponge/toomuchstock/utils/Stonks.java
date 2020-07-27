@@ -37,6 +37,12 @@ public class Stonks {
         deltas[0] = history[0]-history[1];
     }
 
+    /** @return true if history is all boring 1s */
+    public boolean isIdle() {
+        for (double d : history) if (Math.abs(d-1.0) > Math.ulp(1.0)) return false;
+        return true;
+    }
+
     private double getMax() {
         double m = Double.MIN_VALUE;
         for (double d : history)

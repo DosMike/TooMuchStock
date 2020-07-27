@@ -203,6 +203,11 @@ public class ItemTracker {
         stonks = new Stonks(stonkDuration);
     }
 
+    /** @return true if the history tracker for this tracker is filled with 1s */
+    public boolean isIdle() {
+        return stonks.isIdle();
+    }
+
     /**
      * Does not change the discrepancy or any other factor within this tracker.
      * @return the current price multiplier as (discrepancy+1)
