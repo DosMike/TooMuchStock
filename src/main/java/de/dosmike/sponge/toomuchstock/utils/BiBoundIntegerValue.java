@@ -4,8 +4,8 @@ import org.jetbrains.annotations.Nullable;
 
 public class BiBoundIntegerValue {
 
-    private Integer min;
-    private Integer max;
+    private final Integer min;
+    private final Integer max;
     private int value;
 
     /**

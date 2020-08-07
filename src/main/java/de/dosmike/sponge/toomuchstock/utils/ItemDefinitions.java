@@ -1,5 +1,6 @@
 package de.dosmike.sponge.toomuchstock.utils;
 
+import de.dosmike.sponge.toomuchstock.ConfigKeys;
 import ninja.leaping.configurate.ConfigurationNode;
 import ninja.leaping.configurate.objectmapping.ObjectMappingException;
 import org.spongepowered.api.util.TypeTokens;
@@ -13,11 +14,11 @@ public class ItemDefinitions extends HashMap<String, ApplicabilityFilters<?>> {
 
         if (!name.startsWith("$"))
             throw new ObjectMappingException("Names of item definitions have to start with $");
-        String nbtrule = definition.getNode("filter").getString("<UNSET>");
-        if ("exact".equalsIgnoreCase(nbtrule)) {
-            put(name, ApplicabilityFilters.generateContainerExactEquals(definition.getNode("item").getValue(TypeTokens.ITEM_SNAPSHOT_TOKEN)));
+        String nbtrule = definition.getNode(ConfigKeys.KEY_IAF_FILTER).getString("<UNSET>");
+        if (ApplicabilityFilters.DEFAULT_FILTER_ITEMNBT.equalsIgnoreCase(nbtrule)) {
+            put(name, ApplicabilityFilters.generateContainerExactEquals(definition.getNode(ConfigKeys.KEY_IAF_ITEM).getValue(TypeTokens.ITEM_SNAPSHOT_TOKEN)));
         } else {
-            String typedef = definition.getNode("type").getString();
+            String typedef = definition.getNode(ConfigKeys.KEY_IAF_TYPE).getString();
             if (typedef == null)
                 throw new ObjectMappingException("Item Type was not specified for "+name);
             ItemTypeEx type;
@@ -26,12 +27,14 @@ public class ItemDefinitions extends HashMap<String, ApplicabilityFilters<?>> {
             } catch (IllegalArgumentException e) {
                 throw new ObjectMappingException(e);
             }
-            if ("type".equalsIgnoreCase(nbtrule)) {
+            if (ApplicabilityFilters.DEFAULT_FILTER_ITEMTYPEMETA.endsWith(nbtrule)) {
                 if (type.getMeta() == ItemTypeEx.META_IGNORE) {
                     put(name, ApplicabilityFilters.generateItemTypeEquals(type.getType()));
                 } else {
                     put(name, ApplicabilityFilters.generateItemTypeMetaEquals(type));
                 }
+            }if (ApplicabilityFilters.DEFAULT_FILTER_ITEMTYPE.equalsIgnoreCase(nbtrule)) {
+                put(name, ApplicabilityFilters.generateItemTypeEquals(type.getType()));
             } else {
                 throw new ObjectMappingException("Invalid filter "+nbtrule+" for "+type+" ("+name+")");
             }
@@ -41,6 +44,7 @@ public class ItemDefinitions extends HashMap<String, ApplicabilityFilters<?>> {
 
     public void toConfiguration(ConfigurationNode parent) throws ObjectMappingException {
         for (Entry<String, ApplicabilityFilters<?>> entry : entrySet()) {
+            if (!entry.getKey().startsWith("$")) continue; //don't (re-)save item type definitions here
             try {
                 entry.getValue().toConfiguration(parent.getNode(entry.getKey()));
             } catch (Exception e) {

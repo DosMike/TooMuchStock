@@ -88,9 +88,9 @@ public class Stonks {
                     builder.append(Text.builder(steps[values[c]%8]).color(color).onHover(TextActions.showText(Text.of("Value: ",valueFormat.format(history[c]),"\nDelta: ",valueFormat.format(deltas[c])))).build());
             }
             if (i == 0)
-                builder.append(Text.of(" - ", valueFormat.format(min)));
+                builder.append(Text.of(" _ ", valueFormat.format(min)));
             else if (i == lines-1)
-                builder.append(Text.of(" - ", valueFormat.format(max)));
+                builder.append(Text.of(" ￣ ", valueFormat.format(max)));
             l.add(builder.build());
         }
         String spacer = "--------------------";

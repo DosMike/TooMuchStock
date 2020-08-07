@@ -137,18 +137,18 @@ public class TooMuchStock {
             //inject default currency into nodes. this makes the default config more reliable for
             //people that want to use this plugin out of the box
             for (String[] path : Arrays.asList(
-                    new String[]{PriceManipulator.KEY_GLOBAL,  PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_INCOME},
-                    new String[]{PriceManipulator.KEY_GLOBAL,  PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_SPENDING},
-                    new String[]{PriceManipulator.KEY_SHOPS,   PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_INCOME},
-                    new String[]{PriceManipulator.KEY_SHOPS,   PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_SPENDING},
-                    new String[]{PriceManipulator.KEY_PLAYERS, PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_INCOME},
-                    new String[]{PriceManipulator.KEY_PLAYERS, PriceManipulator.KEY_DEFAULT, PriceManipulator.KEY_SPENDING}
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_GLOBAL,  ConfigKeys.KEY_INCOME},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_GLOBAL,  ConfigKeys.KEY_SPENDING},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_SHOPS,   ConfigKeys.KEY_INCOME},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_SHOPS,   ConfigKeys.KEY_SPENDING},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_PLAYERS, ConfigKeys.KEY_INCOME},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_PLAYERS, ConfigKeys.KEY_SPENDING}
             )) {
                 // cast is not redundant (you'll see if you remove it)
                 ConfigurationNode node = defaultRoot.getNode((Object[])path);
-                if (!node.getNode(PriceManipulator.KEY_DEFAULT_CURRENCY).isVirtual()) { // convert "defcur" into the actual default currency
-                    Object value = node.getNode(PriceManipulator.KEY_DEFAULT_CURRENCY).getValue();
-                    node.removeChild(PriceManipulator.KEY_DEFAULT_CURRENCY);
+                if (!node.getNode(ConfigKeys.KEY_DEFAULT_CURRENCY).isVirtual()) { // convert "defcur" into the actual default currency
+                    Object value = node.getNode(ConfigKeys.KEY_DEFAULT_CURRENCY).getValue();
+                    node.removeChild(ConfigKeys.KEY_DEFAULT_CURRENCY);
                     node.getNode(getEconomy().getDefaultCurrency().getId()).setValue(value);
                 }
             }
@@ -157,17 +157,23 @@ public class TooMuchStock {
             return;
         }
         try {
-            config = configManager.load(ConfigurationOptions.defaults()).mergeValuesFrom(defaultRoot);
+            config = configManager.load(ConfigurationOptions.defaults());
+            if (config.getNode(ConfigKeys.KEY_DEFAULT).isVirtual() ||
+                config.getNode(ConfigKeys.KEY_ITEMS).isVirtual() ||
+                config.getNode(ConfigKeys.KEY_RESET).isVirtual()) {
+                config = config.mergeValuesFrom(defaultRoot);
+                configManager.save(config);
+            }
 
             ItemDefinitions definitions = new ItemDefinitions();
-            for (Map.Entry<Object, ? extends CommentedConfigurationNode> entry : config.getNode("items").getChildrenMap().entrySet()) {
+            for (Map.Entry<Object, ? extends CommentedConfigurationNode> entry : config.getNode(ConfigKeys.KEY_ITEMS).getChildrenMap().entrySet()) {
                 definitions.fromConfiguration(entry.getKey().toString(), entry.getValue());
             }
             itemDefinitions = definitions;
 
-            PriceManipulator globalManipulatorBase = PriceManipulator.fromConfiguration(config.getNode(PriceManipulator.KEY_GLOBAL));
-            PriceManipulator shopManipulatorBase = PriceManipulator.fromConfiguration(config.getNode(PriceManipulator.KEY_SHOPS));
-            PriceManipulator playerManipulatorBase = PriceManipulator.fromConfiguration(config.getNode(PriceManipulator.KEY_PLAYERS));
+            PriceManipulator globalManipulatorBase = PriceManipulator.fromConfiguration(config, ConfigKeys.KEY_GLOBAL);
+            PriceManipulator shopManipulatorBase = PriceManipulator.fromConfiguration(config, ConfigKeys.KEY_SHOPS);
+            PriceManipulator playerManipulatorBase = PriceManipulator.fromConfiguration(config, ConfigKeys.KEY_PLAYERS);
             if (hard || priceCalculator==null) {
                 priceCalculator = PriceCalculator.builder()
                         .setGlobalManipulatorTemplate(globalManipulatorBase)
@@ -186,22 +192,16 @@ public class TooMuchStock {
                 String.format("Could not load config: %s", e.getMessage())
             ));
             e.printStackTrace();
-        } finally {
-            try {
-                assert config != null; //make ide happy
-                configManager.save(config);
-            } catch (IOException ignore) {}
         }
 
     }
 
     void saveConfigs() {
 
-        CommentedConfigurationNode config = null;
         try {
-            config = configManager.createEmptyNode();
+            CommentedConfigurationNode config = configManager.createEmptyNode();
 
-            itemDefinitions.toConfiguration(config.getNode("items"));
+            itemDefinitions.toConfiguration(config.getNode(ConfigKeys.KEY_ITEMS).setComment("Can be created with in-game commands to e.g. register vote-keys"));
 
             priceCalculator.dumpBaseConfiguration(config);
 
@@ -213,11 +213,6 @@ public class TooMuchStock {
             Sponge.getServer().getBroadcastChannel().send(Text.of(TextColors.YELLOW,
                     String.format("Could not save config: %s", e.getMessage())
             ));
-        } finally {
-            try {
-                assert config != null; //make ide happy
-                configManager.save(config);
-            } catch (IOException ignore) {}
         }
     }
 

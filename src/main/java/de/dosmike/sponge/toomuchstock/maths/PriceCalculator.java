@@ -2,6 +2,7 @@ package de.dosmike.sponge.toomuchstock.maths;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.reflect.TypeToken;
+import de.dosmike.sponge.toomuchstock.ConfigKeys;
 import de.dosmike.sponge.toomuchstock.TooMuchStock;
 import de.dosmike.sponge.toomuchstock.service.PriceCalculationService;
 import de.dosmike.sponge.toomuchstock.service.TransactionPreview;
@@ -103,10 +104,10 @@ public class PriceCalculator implements PriceCalculationService {
         for (UUID id : stalePlayerManips) playerManips.remove(id);
     }
 
-    public void dumpBaseConfiguration(ConfigurationNode parent) throws ObjectMappingException {
-        globalManip.toConfiguration(parent.getNode("global"));
-        shopBase.toConfiguration(parent.getNode("shops"));
-        playerBase.toConfiguration(parent.getNode("player"));
+    public void dumpBaseConfiguration(CommentedConfigurationNode parent) throws ObjectMappingException {
+        globalManip.toConfiguration(parent, ConfigKeys.KEY_GLOBAL);
+        shopBase.toConfiguration(parent, ConfigKeys.KEY_SHOPS);
+        playerBase.toConfiguration(parent, ConfigKeys.KEY_PLAYERS);
     }
 
     public Optional<ItemTracker> getGlobalTracker(ItemStackSnapshot item) {
