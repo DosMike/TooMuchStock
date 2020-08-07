@@ -1,6 +1,7 @@
 package de.dosmike.sponge.toomuchstock.utils;
 
 import com.google.common.base.Objects;
+import de.dosmike.sponge.toomuchstock.ConfigKeys;
 import ninja.leaping.configurate.ConfigurationNode;
 import ninja.leaping.configurate.objectmapping.ObjectMappingException;
 import org.spongepowered.api.data.DataContainer;
@@ -17,6 +18,10 @@ public abstract class ApplicabilityFilters<T> implements Predicate<ItemStackSnap
 
     private static final DataQuery dqUnsafeDamage = DataQuery.of("UnsafeDamage");
     private static final DataQuery dqStackCount = DataQuery.of("Count");
+
+    public static final String DEFAULT_FILTER_ITEMTYPE = "ItemType";
+    public static final String DEFAULT_FILTER_ITEMTYPEMETA = "ItemTypeEx";
+    public static final String DEFAULT_FILTER_ITEMNBT = "ItemNBT";
 
     final private String comparatorName;
     final protected T template;
@@ -45,7 +50,7 @@ public abstract class ApplicabilityFilters<T> implements Predicate<ItemStackSnap
     }
 
     public static ApplicabilityFilters<ItemType> generateItemTypeEquals(ItemType itemtype) {
-        return new ApplicabilityFilters<ItemType>(itemtype, "ItemType") {
+        return new ApplicabilityFilters<ItemType>(itemtype, DEFAULT_FILTER_ITEMTYPE) {
             @Override
             public boolean test(ItemStackSnapshot itemStack) {
                 return itemStack.getType().equals(template);
@@ -54,7 +59,7 @@ public abstract class ApplicabilityFilters<T> implements Predicate<ItemStackSnap
     }
 
     public static ApplicabilityFilters<ItemTypeEx> generateItemTypeMetaEquals(ItemTypeEx itemtype) {
-        return new ApplicabilityFilters<ItemTypeEx>(itemtype, "ItemTypeEx") {
+        return new ApplicabilityFilters<ItemTypeEx>(itemtype, DEFAULT_FILTER_ITEMTYPEMETA) {
             @Override
             public boolean test(ItemStackSnapshot itemStack) {
                 return template.equals(itemStack);
@@ -64,7 +69,7 @@ public abstract class ApplicabilityFilters<T> implements Predicate<ItemStackSnap
 
     /** ignores quantity */
     public static ApplicabilityFilters<ItemStackSnapshot> generateContainerExactEquals(ItemStackSnapshot template) {
-        return new ApplicabilityFilters<ItemStackSnapshot>(template, "ItemType") {
+        return new ApplicabilityFilters<ItemStackSnapshot>(template, DEFAULT_FILTER_ITEMNBT) {
             final ItemType type = template.getType();
             final DataContainer container = template.toContainer().remove(dqStackCount);
             @Override
@@ -83,13 +88,13 @@ public abstract class ApplicabilityFilters<T> implements Predicate<ItemStackSnap
     };
 
     public void toConfiguration(ConfigurationNode parent) throws ObjectMappingException {
-        parent.getNode("filter").setValue(comparatorName);
+        parent.getNode(ConfigKeys.KEY_IAF_FILTER).setValue(comparatorName);
         if (template instanceof ItemType) {
-            parent.getNode("type").setValue(((ItemType) template).getId());
+            parent.getNode(ConfigKeys.KEY_IAF_TYPE).setValue(((ItemType) template).getId());
         } else if (template instanceof ItemTypeEx) {
-            parent.getNode("type").setValue(template.toString());
+            parent.getNode(ConfigKeys.KEY_IAF_TYPE).setValue(template.toString());
         } else if (template instanceof ItemStackSnapshot) {
-            parent.getNode("item").setValue(TypeTokens.ITEM_SNAPSHOT_TOKEN, (ItemStackSnapshot)template);
+            parent.getNode(ConfigKeys.KEY_IAF_ITEM).setValue(TypeTokens.ITEM_SNAPSHOT_TOKEN, (ItemStackSnapshot)template);
         } else {
             parent.getNode("hint").setValue("Can't serialize custom Applicability Filter");
         }

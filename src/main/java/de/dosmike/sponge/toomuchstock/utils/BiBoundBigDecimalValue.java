@@ -6,8 +6,8 @@ import java.math.BigDecimal;
 
 public class BiBoundBigDecimalValue {
 
-    private BigDecimal min;
-    private BigDecimal max;
+    private final BigDecimal min;
+    private final BigDecimal max;
     private BigDecimal value;
 
     /**

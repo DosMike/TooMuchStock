@@ -31,16 +31,23 @@ public class ItemTypeEx {
             } else {
                 throw new IllegalArgumentException("No item with type "+definition+" found (OreDict is not supported)");
             }
-        } else if (definition.indexOf(':') != lioc) { //two colons
-            String intpart = definition.substring(lioc+1);
-            String typePart = definition.substring(0, lioc);
-            this.itemType = Sponge.getRegistry().getType(ItemType.class, typePart).orElseThrow(()->new IllegalArgumentException("Could not find item type for "+definition));
-            if (!intpart.equals("*")) {
-                try {
-                    meta = Integer.parseInt(intpart);
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException("Meta value not * or integer for "+definition);
-                }
+            return;
+        }
+        String typePart; //quasi final for lambda
+        String metaPart;
+        if (definition.indexOf(':') != lioc) { //two colons
+            metaPart = definition.substring(lioc+1);
+            typePart = definition.substring(0, lioc);
+        } else {
+            metaPart="*";
+            typePart = definition;
+        }
+        this.itemType = Sponge.getRegistry().getType(ItemType.class, typePart).orElseThrow(()->new IllegalArgumentException("Could not find item type for "+definition));
+        if (!metaPart.equals("*")) {
+            try {
+                meta = Integer.parseInt(metaPart);
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Meta value not * or integer for "+definition);
             }
         }
     }

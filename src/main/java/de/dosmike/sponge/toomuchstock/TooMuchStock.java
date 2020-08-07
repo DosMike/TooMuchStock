@@ -15,8 +15,10 @@ import ninja.leaping.configurate.objectmapping.ObjectMappingException;
 import org.slf4j.Logger;
 import org.spongepowered.api.Sponge;
 import org.spongepowered.api.command.CommandSource;
+import org.spongepowered.api.config.ConfigDir;
 import org.spongepowered.api.config.DefaultConfig;
 import org.spongepowered.api.event.Listener;
+import org.spongepowered.api.event.Order;
 import org.spongepowered.api.event.game.GameReloadEvent;
 import org.spongepowered.api.event.game.state.GameInitializationEvent;
 import org.spongepowered.api.event.game.state.GamePostInitializationEvent;
@@ -30,10 +32,12 @@ import org.spongepowered.api.text.Text;
 import org.spongepowered.api.text.format.TextColors;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
-@Plugin(id = "toomuchstock", name = "Too Much Stock", version = "1.0-alpha-2")
+@Plugin(id = "toomuchstock", name = "Too Much Stock", version = "1.0")
 public class TooMuchStock {
 
     private static TooMuchStock instance;
@@ -61,6 +65,7 @@ public class TooMuchStock {
         return instance.itemDefinitions;
     }
     public static PriceCalculator getPriceCalculator() { return instance.priceCalculator; }
+    public static Path getCacheDirectory() { return instance.configPath.resolve("cache"); }
 
     PluginContainer getContainer() {
         return Sponge.getPluginManager().fromInstance(this).orElseThrow(()->new InternalError("No plugin container for self returned"));
@@ -81,7 +86,11 @@ public class TooMuchStock {
     @DefaultConfig(sharedRoot = false)
     private ConfigurationLoader<CommentedConfigurationNode> configManager;
 
-    @Listener
+    @Inject
+    @ConfigDir(sharedRoot = false)
+    private Path configPath;
+
+    @Listener(order=Order.LATE) //order late to have economy (hopefully) load before, because we need the default currency
     public void onServerPreInit(GamePreInitializationEvent event) {
         instance = this;
         syncScheduler = Sponge.getScheduler().createSyncExecutor(this);
@@ -97,6 +106,8 @@ public class TooMuchStock {
         // service should already be going in here
         l("Registering commands...");
         Commands.register(this);
+
+        syncScheduler.scheduleAtFixedRate(()->priceCalculator.thinkTick(), 1, 1, TimeUnit.MINUTES);
     }
 
     @Listener
@@ -120,41 +131,50 @@ public class TooMuchStock {
         HoconConfigurationLoader defaultLoader = HoconConfigurationLoader.builder().setURL(Sponge.getAssetManager().getAsset(instance, "default.conf").get().getUrl()).build();
         CommentedConfigurationNode defaultRoot = null;
         CommentedConfigurationNode config = null;
+
         try {
             defaultRoot = defaultLoader.load(ConfigurationOptions.defaults());
             //inject default currency into nodes. this makes the default config more reliable for
             //people that want to use this plugin out of the box
             for (String[] path : Arrays.asList(
-                    new String[]{"global", "default", "incomeLimit"},
-                    new String[]{"global", "default", "spendingLimit"},
-                    new String[]{"shops", "default", "incomeLimit"},
-                    new String[]{"shops", "default", "spendingLimit"},
-                    new String[]{"players", "default", "incomeLimit"},
-                    new String[]{"players", "default", "spendingLimit"}
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_GLOBAL,  ConfigKeys.KEY_INCOME},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_GLOBAL,  ConfigKeys.KEY_SPENDING},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_SHOPS,   ConfigKeys.KEY_INCOME},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_SHOPS,   ConfigKeys.KEY_SPENDING},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_PLAYERS, ConfigKeys.KEY_INCOME},
+                    new String[]{ConfigKeys.KEY_DEFAULT, ConfigKeys.KEY_PLAYERS, ConfigKeys.KEY_SPENDING}
             )) {
                 // cast is not redundant (you'll see if you remove it)
                 ConfigurationNode node = defaultRoot.getNode((Object[])path);
-                Object value = node.getNode("defcur").getValue();
-                node.removeChild("defcur");
-                node.getNode(getEconomy().getDefaultCurrency().getId()).setValue(value);
+                if (!node.getNode(ConfigKeys.KEY_DEFAULT_CURRENCY).isVirtual()) { // convert "defcur" into the actual default currency
+                    Object value = node.getNode(ConfigKeys.KEY_DEFAULT_CURRENCY).getValue();
+                    node.removeChild(ConfigKeys.KEY_DEFAULT_CURRENCY);
+                    node.getNode(getEconomy().getDefaultCurrency().getId()).setValue(value);
+                }
             }
         } catch (Exception e) { //should always load
             e.printStackTrace();
             return;
         }
         try {
-            config = configManager.load(ConfigurationOptions.defaults()).mergeValuesFrom(defaultRoot);
+            config = configManager.load(ConfigurationOptions.defaults());
+            if (config.getNode(ConfigKeys.KEY_DEFAULT).isVirtual() ||
+                config.getNode(ConfigKeys.KEY_ITEMS).isVirtual() ||
+                config.getNode(ConfigKeys.KEY_RESET).isVirtual()) {
+                config = config.mergeValuesFrom(defaultRoot);
+                configManager.save(config);
+            }
 
             ItemDefinitions definitions = new ItemDefinitions();
-            for (Map.Entry<Object, ? extends CommentedConfigurationNode> entry : config.getNode("items").getChildrenMap().entrySet()) {
+            for (Map.Entry<Object, ? extends CommentedConfigurationNode> entry : config.getNode(ConfigKeys.KEY_ITEMS).getChildrenMap().entrySet()) {
                 definitions.fromConfiguration(entry.getKey().toString(), entry.getValue());
             }
             itemDefinitions = definitions;
 
-            PriceManipulator globalManipulatorBase = PriceManipulator.fromConfiguration(config.getNode("global"));
-            PriceManipulator shopManipulatorBase = PriceManipulator.fromConfiguration(config.getNode("shops"));
-            PriceManipulator playerManipulatorBase = PriceManipulator.fromConfiguration(config.getNode("player"));
-            if (hard) {
+            PriceManipulator globalManipulatorBase = PriceManipulator.fromConfiguration(config, ConfigKeys.KEY_GLOBAL);
+            PriceManipulator shopManipulatorBase = PriceManipulator.fromConfiguration(config, ConfigKeys.KEY_SHOPS);
+            PriceManipulator playerManipulatorBase = PriceManipulator.fromConfiguration(config, ConfigKeys.KEY_PLAYERS);
+            if (hard || priceCalculator==null) {
                 priceCalculator = PriceCalculator.builder()
                         .setGlobalManipulatorTemplate(globalManipulatorBase)
                         .setShopsManipulatorTemplate(shopManipulatorBase)
@@ -171,22 +191,17 @@ public class TooMuchStock {
             Sponge.getServer().getBroadcastChannel().send(Text.of(TextColors.YELLOW,
                 String.format("Could not load config: %s", e.getMessage())
             ));
-        } finally {
-            try {
-                assert config != null; //make ide happy
-                configManager.save(config);
-            } catch (IOException ignore) {}
+            e.printStackTrace();
         }
 
     }
 
     void saveConfigs() {
 
-        CommentedConfigurationNode config = null;
         try {
-            config = configManager.createEmptyNode();
+            CommentedConfigurationNode config = configManager.createEmptyNode();
 
-            itemDefinitions.toConfiguration(config.getNode("items"));
+            itemDefinitions.toConfiguration(config.getNode(ConfigKeys.KEY_ITEMS).setComment("Can be created with in-game commands to e.g. register vote-keys"));
 
             priceCalculator.dumpBaseConfiguration(config);
 
@@ -198,11 +213,6 @@ public class TooMuchStock {
             Sponge.getServer().getBroadcastChannel().send(Text.of(TextColors.YELLOW,
                     String.format("Could not save config: %s", e.getMessage())
             ));
-        } finally {
-            try {
-                assert config != null; //make ide happy
-                configManager.save(config);
-            } catch (IOException ignore) {}
         }
     }
 

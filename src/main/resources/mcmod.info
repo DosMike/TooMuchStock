@@ -1,8 +1,8 @@
 [{
   "modid": "toomuchstock",
   "name": "TooMuchStock",
-  "description": "Play Minesweeper in a inventory",
-  "version": "1.0-alpha-2",
+  "description": "Dynamic pricing API",
+  "version": "1.0",
   "url": "",
   "authorList": [ "DosMike" ],
   "requiredMods": [ "spongeapi@7.0.0", "megamenus@0.6" ],

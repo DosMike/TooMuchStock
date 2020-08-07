@@ -1,12 +1,16 @@
 package de.dosmike.sponge.toomuchstock.maths;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.reflect.TypeToken;
+import de.dosmike.sponge.toomuchstock.ConfigKeys;
 import de.dosmike.sponge.toomuchstock.TooMuchStock;
 import de.dosmike.sponge.toomuchstock.service.PriceCalculationService;
 import de.dosmike.sponge.toomuchstock.service.TransactionPreview;
 import de.dosmike.sponge.toomuchstock.utils.DecayUtil;
 import de.dosmike.sponge.toomuchstock.utils.VMath;
 import ninja.leaping.configurate.ConfigurationNode;
+import ninja.leaping.configurate.commented.CommentedConfigurationNode;
+import ninja.leaping.configurate.hocon.HoconConfigurationLoader;
 import ninja.leaping.configurate.objectmapping.ObjectMappingException;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.api.Sponge;
@@ -15,7 +19,12 @@ import org.spongepowered.api.item.inventory.ItemStackSnapshot;
 import org.spongepowered.api.service.economy.Currency;
 import org.spongepowered.api.service.economy.account.UniqueAccount;
 
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.*;
 
 /**
@@ -58,11 +67,11 @@ public class PriceCalculator implements PriceCalculationService {
             return Builder.this;
         }
         public Builder setShopsManipulatorTemplate(PriceManipulator manipulator) {
-            manipulatorTemplateGlobal = manipulator;
+            manipulatorTemplateShops = manipulator;
             return Builder.this;
         }
         public Builder setPlayerManipulatorTemplate(PriceManipulator manipulator) {
-            manipulatorTemplateGlobal = manipulator;
+            manipulatorTemplatePlayer = manipulator;
             return Builder.this;
         }
         public PriceCalculator build() {
@@ -78,10 +87,27 @@ public class PriceCalculator implements PriceCalculationService {
     }
     //endregion
 
-    public void dumpBaseConfiguration(ConfigurationNode parent) throws ObjectMappingException {
-        globalManip.toConfiguration(parent.getNode("global"));
-        shopBase.toConfiguration(parent.getNode("shops"));
-        playerBase.toConfiguration(parent.getNode("player"));
+    //expected to be called once a minute
+    public void thinkTick() {
+        Set<UUID> staleShopManips = new HashSet<>();
+        Set<UUID> stalePlayerManips = new HashSet<>();
+        globalManip.think();
+        for (Map.Entry<UUID, PriceManipulator> e : shopManips.entrySet()) {
+            e.getValue().think();
+            if (e.getValue().isIdle()) staleShopManips.add(e.getKey());
+        }
+        for (Map.Entry<UUID, PriceManipulator> e : playerManips.entrySet()) {
+            e.getValue().think();
+            if (e.getValue().isIdle()) stalePlayerManips.add(e.getKey());
+        }
+        for (UUID id : staleShopManips) shopManips.remove(id);
+        for (UUID id : stalePlayerManips) playerManips.remove(id);
+    }
+
+    public void dumpBaseConfiguration(CommentedConfigurationNode parent) throws ObjectMappingException {
+        globalManip.toConfiguration(parent, ConfigKeys.KEY_GLOBAL);
+        shopBase.toConfiguration(parent, ConfigKeys.KEY_SHOPS);
+        playerBase.toConfiguration(parent, ConfigKeys.KEY_PLAYERS);
     }
 
     public Optional<ItemTracker> getGlobalTracker(ItemStackSnapshot item) {
@@ -99,12 +125,10 @@ public class PriceCalculator implements PriceCalculationService {
     }
     public Result getPurchaseInformation(ItemStackSnapshot item, int amount, BigDecimal staticPrice, Currency currency, @Nullable UUID shopID, @Nullable UUID playerID) {
         ItemTracker global = globalManip.getTrackerFor(item);
-        PriceManipulator manip = shopManips.get(shopID);
-        if (manip == null) shopManips.put(shopID, manip = shopBase.clone());
-        ItemTracker shop = manip.getTrackerFor(item); //or null
-        manip = playerManips.get(shopID);
-        if (manip == null) playerManips.put(shopID, manip = playerBase.clone());
-        ItemTracker player = manip.getTrackerFor(item); //or null
+        ItemTracker shop = shopManips.computeIfAbsent(shopID, (id)->shopBase.clone())
+                .getTrackerFor(item); //or null
+        ItemTracker player = playerManips.computeIfAbsent(playerID, (id)->playerBase.clone())
+                .getTrackerFor(item); //or null
 
         return new Result(global, shop, player, item, amount, true, staticPrice, currency, getAccountBalance(playerID, currency));
     }
@@ -113,12 +137,10 @@ public class PriceCalculator implements PriceCalculationService {
     }
     public Result getSellingInformation(ItemStackSnapshot item, int amount, BigDecimal staticPrice, Currency currency, @Nullable UUID shopID, @Nullable UUID playerID) {
         ItemTracker global = globalManip.getTrackerFor(item);
-        PriceManipulator manip = shopManips.get(shopID);
-        if (manip == null) shopManips.put(shopID, manip = shopBase.clone());
-        ItemTracker shop = manip.getTrackerFor(item); //or null
-        manip = playerManips.get(shopID);
-        if (manip == null) playerManips.put(shopID, manip = playerBase.clone());
-        ItemTracker player = manip.getTrackerFor(item); //or null
+        ItemTracker shop = shopManips.computeIfAbsent(shopID, (id)->shopBase.clone())
+                .getTrackerFor(item); //or null
+        ItemTracker player = playerManips.computeIfAbsent(playerID, (id)->playerBase.clone())
+                .getTrackerFor(item); //or null
 
         return new Result(global, shop, player, item, amount, false, staticPrice, currency, getAccountCapacity(playerID, currency));
     }
@@ -136,22 +158,22 @@ public class PriceCalculator implements PriceCalculationService {
      * get_Information methods
      */
     public BigDecimal getCurrentPurchasePrice(ItemStackSnapshot item, int amount, BigDecimal staticPrice, @Nullable UUID shopID, @Nullable UUID playerID) {
+        if (amount == 0) return BigDecimal.ZERO;
         ItemTracker global = globalManip.getTrackerFor(item);
-        PriceManipulator manip = shopManips.get(shopID);
-        if (manip == null) shopManips.put(shopID, manip = shopBase.clone());
-        ItemTracker shop = manip.getTrackerFor(item); //or null
-        manip = playerManips.get(shopID);
-        if (manip == null) playerManips.put(shopID, manip = playerBase.clone());
-        ItemTracker player = manip.getTrackerFor(item); //or null
+        ItemTracker shop = shopManips.computeIfAbsent(shopID, (id)->shopBase.clone())
+                .getTrackerFor(item); //or null
+        ItemTracker player = playerManips.computeIfAbsent(playerID, (id)->playerBase.clone())
+                .getTrackerFor(item); //or null
 
-        double scale = 1d;
-        scale = scale * DecayUtil.exponentialGrowth(global.peek(), global.getGrowthRate(), amount);
+        // We want the scale FOR amount items, not AFTER amount items, so subtract 1
+        List<Double> mods = DecayUtil.createGrowthMultiplicationVector(global.peek(), global.getGrowthRate(), amount-1);
         if (shop != null) {
-            scale = scale * DecayUtil.exponentialGrowth(shop.peek(), shop.getGrowthRate(), amount);
+            mods = multiply(mods, DecayUtil.createGrowthMultiplicationVector(shop.peek(), shop.getGrowthRate(), amount-1));
         }
         if (player != null) {
-            scale = scale * DecayUtil.exponentialGrowth(player.peek(), player.getGrowthRate(), amount);
+            mods = multiply(mods, DecayUtil.createGrowthMultiplicationVector(player.peek(), player.getGrowthRate(), amount-1));
         }
+        double scale = mods.stream().reduce(Double::sum).get();
         return BigDecimal.valueOf(scale).multiply(staticPrice);
     }
     /**
@@ -168,22 +190,22 @@ public class PriceCalculator implements PriceCalculationService {
      * get_Information methods
      */
     public BigDecimal getCurrentSellingPrice(ItemStackSnapshot item, int amount, BigDecimal staticPrice, @Nullable UUID shopID, @Nullable UUID playerID) {
+        if (amount == 0) return BigDecimal.ZERO;
         ItemTracker global = globalManip.getTrackerFor(item);
-        PriceManipulator manip = shopManips.get(shopID);
-        if (manip == null) shopManips.put(shopID, manip = shopBase.clone());
-        ItemTracker shop = manip.getTrackerFor(item); //or null
-        manip = playerManips.get(shopID);
-        if (manip == null) playerManips.put(shopID, manip = playerBase.clone());
-        ItemTracker player = manip.getTrackerFor(item); //or null
+        ItemTracker shop = shopManips.computeIfAbsent(shopID, (id)->shopBase.clone())
+                .getTrackerFor(item); //or null
+        ItemTracker player = playerManips.computeIfAbsent(playerID, (id)->playerBase.clone())
+                .getTrackerFor(item); //or null
 
-        double scale = 1d;
-        scale = scale * DecayUtil.exponentialGrowth(global.peek(), global.getDecayRate(), amount);
+        // We want the scale FOR amount items, not AFTER amount items, so subtract 1
+        List<Double> mods = DecayUtil.createDecayMultiplicationVector(global.peek(), global.getDecayRate(), amount-1);
         if (shop != null) {
-            scale = scale * DecayUtil.exponentialGrowth(shop.peek(), shop.getDecayRate(), amount);
+            mods = multiply(mods, DecayUtil.createDecayMultiplicationVector(shop.peek(), shop.getDecayRate(), amount-1));
         }
         if (player != null) {
-            scale = scale * DecayUtil.exponentialGrowth(player.peek(), player.getDecayRate(), amount);
+            mods = multiply(mods, DecayUtil.createDecayMultiplicationVector(player.peek(), player.getDecayRate(), amount-1));
         }
+        double scale = mods.stream().reduce(Double::sum).get();
         return BigDecimal.valueOf(scale).multiply(staticPrice);
     }
 
@@ -212,46 +234,45 @@ public class PriceCalculator implements PriceCalculationService {
             this.player = player;
             this.item = item;
             this.amount = amount;
+            this.purchase = purchase;
             this.staticPrice = staticPrice;
             this.currency = currency;
             this.playerBalance = playerBalance;
             nItemValue = new ArrayList<>(amount+1);
+            for (int i=0;i<=amount;i++) nItemValue.add(BigDecimal.ZERO); //can't be empty for update()
             canAfford = purchase ? 0 : Integer.MAX_VALUE;
             limitAccount = purchase ? 0 : Integer.MAX_VALUE;
             limitCurrency = purchase ? 0 : Integer.MAX_VALUE;
             limitItems = purchase ? 0 : Integer.MAX_VALUE;
-            Collections.fill(nItemValue, BigDecimal.ZERO); //can't be empty for update()
             update();
         }
         /** calculated the end values for each amount and updated the can-afford value for the passed player balance. the player balance will not be updated */
         public void update() {
-            List<Double> scales = new ArrayList<>(amount+1);
-            Collections.fill(scales, 1d);
+            //hold multiplicators for (index+1)th item
+            List<Double> scales; // indices: 0, 1, ..., AMOUNT-1
+
             // max value is minimum available value over all trackers
             BigDecimal maxValue;
             // max amount is minimum available amount over all trackers
-            scales = multiply(scales, purchase
-                    ? DecayUtil.createGrowthMultiplicationVector(global.peek(), global.getGrowthRate(), amount)
-                    : DecayUtil.createDecayMultiplicationVector(global.peek(), global.getDecayRate(), amount)
-            );
+
             if (purchase) {
+                scales = DecayUtil.createGrowthMultiplicationVector(global.peek(), global.getGrowthRate(), amount-1);
                 maxValue = global.getPurchaseValueCapacity(currency);
                 limitItems = global.getPurchaseItemCapacity();
             } else {
+                scales = DecayUtil.createDecayMultiplicationVector(global.peek(), global.getDecayRate(), amount-1);
                 maxValue = global.getDistributeValueCapacity(currency);
                 limitItems = global.getDistributeItemCapacity();
             }
             if (shop != null) {
-                scales = multiply(scales, purchase
-                        ? DecayUtil.createGrowthMultiplicationVector(shop.peek(), shop.getGrowthRate(), amount)
-                        : DecayUtil.createDecayMultiplicationVector(shop.peek(), shop.getDecayRate(), amount)
-                );
                 if (purchase) {
+                    scales = multiply(scales, DecayUtil.createGrowthMultiplicationVector(shop.peek(), shop.getGrowthRate(), amount-1));
                     BigDecimal cap = shop.getPurchaseValueCapacity(currency);
                     if (cap.compareTo(maxValue)<0) maxValue = cap;
                     int cnt = shop.getPurchaseItemCapacity();
                     if (cnt < limitItems) limitItems = cnt;
                 } else {
+                    scales = multiply(scales, DecayUtil.createDecayMultiplicationVector(shop.peek(), shop.getDecayRate(), amount-1));
                     BigDecimal cap = shop.getDistributeValueCapacity(currency);
                     if (cap.compareTo(maxValue)<0) maxValue = cap;
                     int cnt = shop.getDistributeItemCapacity();
@@ -259,25 +280,24 @@ public class PriceCalculator implements PriceCalculationService {
                 }
             }
             if (player != null) {
-                scales = multiply(scales, purchase
-                        ? DecayUtil.createGrowthMultiplicationVector(player.peek(), player.getGrowthRate(), amount)
-                        : DecayUtil.createDecayMultiplicationVector(player.peek(), player.getDecayRate(), amount)
-                );
                 if (purchase) {
+                    scales = multiply(scales, DecayUtil.createGrowthMultiplicationVector(player.peek(), player.getGrowthRate(), amount-1));
                     BigDecimal cap = player.getPurchaseValueCapacity(currency);
                     if (cap.compareTo(maxValue)<0) maxValue = cap;
                     int cnt = player.getPurchaseItemCapacity();
                     if (cnt < limitItems) limitItems = cnt;
                 } else {
+                    scales = multiply(scales, DecayUtil.createDecayMultiplicationVector(player.peek(), player.getDecayRate(), amount-1));
                     BigDecimal cap = player.getDistributeValueCapacity(currency);
                     if (cap.compareTo(maxValue)<0) maxValue = cap;
                     int cnt = player.getDistributeItemCapacity();
                     if (cnt < limitItems) limitItems = cnt;
                 }
             }
-            BigDecimal thisValue;
-            for (int i = 1; i < amount; i++) {
-                thisValue = staticPrice.multiply(BigDecimal.valueOf(scales.get(i-1))); //price of 1 item is static price * multiplier after 0 iterations
+            BigDecimal thisValue; BigDecimal accumulativeMultiplier = BigDecimal.ZERO;
+            for (int i = 1; i <= amount; i++) {
+                accumulativeMultiplier = accumulativeMultiplier.add(BigDecimal.valueOf(scales.get(i-1))); //price of 1 item is static price * multiplier after 0 iterations
+                thisValue = staticPrice.multiply(accumulativeMultiplier);
                 nItemValue.set(i, thisValue);
                 if (purchase) {
                     if ((playerBalance == null || playerBalance.compareTo(thisValue) >= 0)) {
@@ -297,11 +317,6 @@ public class PriceCalculator implements PriceCalculationService {
                 }
             }
             canAfford = VMath.min(limitAccount, limitItems, limitCurrency, amount);
-        }
-        private static List<Double> multiply(List<Double> a, List<Double> b) {
-            List<Double> elemsum = new ArrayList<>(a.size());
-            for (int i = 0; i < a.size(); i++) elemsum.add(a.get(i)*b.get(i));
-            return elemsum;
         }
         /** The index of the returned list matched the number of items for the value at the index */
         public ImmutableList<BigDecimal> getCumulativeValueForItems() {
@@ -365,5 +380,59 @@ public class PriceCalculator implements PriceCalculationService {
     private BigDecimal getAccountCapacity(@Nullable UUID playerID, Currency currency) {
         return null; //don't know how to get that
     }
+
+    private static List<Double> multiply(List<Double> a, List<Double> b) {
+        assert a.size()==b.size();
+        List<Double> elemsum = new ArrayList<>(a.size());
+        for (int i = 0; i < a.size(); i++) elemsum.add(a.get(i)*b.get(i));
+        return elemsum;
+    }
+
+//    public void unloadPlayerState(UUID player) {
+//        PriceManipulator manipulator = playerManips.remove(player);
+//        if (manipulator==null) return;
+//        manipulator.cleanUp();
+//        try {
+//            Path playerCache = TooMuchStock.getCacheDirectory()
+//                    .resolve("players");
+//            Files.createDirectories(playerCache);
+//            playerCache = playerCache.resolve(player.toString().replace("-", "")+".bin");
+//
+//            HoconConfigurationLoader loader = HoconConfigurationLoader.builder()
+//                    .setPath(playerCache)
+//                    .build();
+//            CommentedConfigurationNode node = loader.createEmptyNode();
+//            manipulator.toConfiguration(node);
+//            node.getNode("StateTime").setValue(System.currentTimeMillis());
+//            loader.save(node);
+//        } catch (Throwable t) {
+//            TooMuchStock.w("Could not dump player state for %s", player.toString());
+//            t.printStackTrace();
+//        }
+//    }
+//    public void loadPlayerState(UUID player) {
+//        try {
+//            Path playerCache = TooMuchStock.getCacheDirectory()
+//                    .resolve("players")
+//                    .resolve(player.toString().replace("-", "")+".bin");
+//            if (!Files.exists(playerCache)) return; //nothing caches
+//
+//            HoconConfigurationLoader loader = HoconConfigurationLoader.builder()
+//                    .setPath(playerCache)
+//                    .build();
+//            CommentedConfigurationNode node = loader.load();
+//            PriceManipulator manipulator = PriceManipulator.fromConfiguration(node);
+//            long stateTime = node.getNode("StateTime").getLong();
+//            loader.save(node);
+//            //patch in new base tracker values
+//            manipulator.merge(playerBase);
+//            manipulator.bigBrainTime(stateTime);
+//            manipulator.cleanUp();
+//            playerManips.put(player, manipulator);
+//        } catch (Throwable t) {
+//            TooMuchStock.w("Could not read cached player state for %s. State is reset", player.toString());
+//            t.printStackTrace();
+//        }
+//    }
 
 }

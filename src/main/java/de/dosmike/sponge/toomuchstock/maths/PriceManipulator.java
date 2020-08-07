@@ -1,10 +1,13 @@
 package de.dosmike.sponge.toomuchstock.maths;
 
+import de.dosmike.sponge.toomuchstock.ConfigKeys;
 import de.dosmike.sponge.toomuchstock.TooMuchStock;
 import de.dosmike.sponge.toomuchstock.utils.ApplicabilityFilters;
 import de.dosmike.sponge.toomuchstock.utils.ItemTypeEx;
 import ninja.leaping.configurate.ConfigurationNode;
+import ninja.leaping.configurate.commented.CommentedConfigurationNode;
 import ninja.leaping.configurate.objectmapping.ObjectMappingException;
+import org.intellij.lang.annotations.MagicConstant;
 import org.spongepowered.api.item.inventory.ItemStackSnapshot;
 
 import java.util.*;
@@ -75,6 +78,10 @@ public class PriceManipulator {
         }
         return Optional.empty();
     }
+    /** @return true if the number of tracked items is 0 */
+    public boolean isIdle() {
+        return trackers.isEmpty();
+    }
 
     /**
      * To be called once a minute. Will reset the Trackers when the
@@ -105,7 +112,7 @@ public class PriceManipulator {
     /**
      * Performs the think transformations for the specified amount of time without repeatedly calling think.
      * This will bring all item trackers in this manipulator back to date. This allows unloading data for players
-     * that are offline. Shop and global manipulators should not call this!
+     * that are offline. Shop and global manipulators probably should not call this!
      * @param from the last calculated time in ms
      */
     public void bigBrainTime(long from) {
@@ -144,6 +151,11 @@ public class PriceManipulator {
         for (ItemTracker t : trackers) t.decayTicks(minutes);
     }
 
+    /** delete all ItemTrackers that are currently "idle", meaning they have a discrepancy of 0 */
+    public void cleanUp() {
+        trackers.removeIf(ItemTracker::isIdle);
+    }
+
     protected PriceManipulator clone()  {
         PriceManipulator clone = new PriceManipulator();
         clone.resetTimePoint = this.resetTimePoint;
@@ -171,16 +183,18 @@ public class PriceManipulator {
         trackers.addAll(newTrackers);
     }
 
-    public static PriceManipulator fromConfiguration(ConfigurationNode node) throws ObjectMappingException {
+    public static PriceManipulator fromConfiguration(ConfigurationNode node, @MagicConstant(stringValues = {ConfigKeys.KEY_GLOBAL, ConfigKeys.KEY_SHOPS, ConfigKeys.KEY_PLAYERS}) String forType) throws ObjectMappingException {
         PriceManipulator manipulator = new PriceManipulator();
         for (Map.Entry<Object, ? extends ConfigurationNode> entry : node.getChildrenMap().entrySet()) {
             String key = entry.getKey().toString();
-            if ("reset".equalsIgnoreCase(key)) {
+            ConfigurationNode valueNode = entry.getValue().getNode(forType);
+            if (ConfigKeys.KEY_ITEMS.equalsIgnoreCase(key)) {
+                continue; /* not here */
+            } else if (ConfigKeys.KEY_RESET.equalsIgnoreCase(key)) {
                 manipulator.hasResetTime = true;
-                String value = entry.getValue().getString();
+                String value = valueNode.getString();
                 try {
-                    int interval = Integer.parseInt(value);
-                    manipulator.resetTimeInterval = interval;
+                    manipulator.resetTimeInterval = Integer.parseInt(value);
                     manipulator.resetTimePoint = null;
                 } catch (NumberFormatException e) {
                     Pattern time = Pattern.compile("((?:[01]?[0-9])|(?:2[0-4])):([0-5]?[0-9])");
@@ -197,34 +211,45 @@ public class PriceManipulator {
                 }
 
             // key can be item type, item type + meta or name for named map of "default"
-            } else if ("default".equalsIgnoreCase(key)) {
-                manipulator.defaultTrackerConfiguration = ItemTracker.fromConfiguration("default", ApplicabilityFilters.pass, entry.getValue());
+            } else if (ConfigKeys.KEY_DEFAULT.equalsIgnoreCase(key)) {
+                manipulator.defaultTrackerConfiguration = ItemTracker.fromConfiguration(ConfigKeys.KEY_DEFAULT, ApplicabilityFilters.pass, valueNode);
             } else {
                 ApplicabilityFilters<?> filter;
-                filter = TooMuchStock.getItemDefinitionTable().getOrDefault(key, ApplicabilityFilters.generateItemTypeMetaEquals(new ItemTypeEx(key)));
-                ItemTracker tracker = ItemTracker.fromConfiguration(key, filter, entry.getValue());
+                filter = TooMuchStock.getItemDefinitionTable().computeIfAbsent(key, (k)->ApplicabilityFilters.generateItemTypeMetaEquals(new ItemTypeEx(k)));
+                ItemTracker tracker = ItemTracker.fromConfiguration(key, filter, valueNode);
                 manipulator.trackers.add(tracker);
             }
         }
         if (manipulator.defaultTrackerConfiguration == null) {
-            throw new ObjectMappingException("Missing 'default' configuration value");
+            throw new ObjectMappingException("Missing '"+ ConfigKeys.KEY_DEFAULT+"' configuration value");
         }
         return manipulator;
     }
 
-    public void toConfiguration(ConfigurationNode parent) throws ObjectMappingException {
+    public void toConfiguration(CommentedConfigurationNode parent, @MagicConstant(stringValues = {ConfigKeys.KEY_GLOBAL, ConfigKeys.KEY_SHOPS, ConfigKeys.KEY_PLAYERS}) String forType) throws ObjectMappingException {
         for (ItemTracker tracker : trackers) {
             if (!tracker.derived)
-                tracker.toConfiguration(parent.getNode(tracker.getApplicabilityFilterName()));
+                tracker.toConfiguration(parent.getNode(tracker.getApplicabilityFilterName()).getNode(forType));
         }
-        defaultTrackerConfiguration.toConfiguration(parent.getNode("default"));
+        CommentedConfigurationNode node = parent.getNode(ConfigKeys.KEY_DEFAULT).getNode(forType);
+        if (forType.equals(ConfigKeys.KEY_GLOBAL))
+            node.setComment(".setComment(\"how much total volume can be traded on the server per specific items\")");
+        else if (forType.equals(ConfigKeys.KEY_SHOPS))
+            node.setComment("how much total volume can be traded within a shop per specific items\n"+
+                "the values and related stuff for this part will run separate for every shop");
+        else if (forType.equals(ConfigKeys.KEY_PLAYERS))
+            node.setComment("how much total volume can be traded per player per specific items\n" +
+                "the values and related stuff for this part will run separate for every player");
+        defaultTrackerConfiguration.toConfiguration(node);
         if (hasResetTime) {
             if (resetTimeInterval != null) {
-                parent.getNode("reset").setValue(resetTimeInterval);
+                parent.getNode(ConfigKeys.KEY_RESET).getNode(forType).setValue(resetTimeInterval);
             } else if (resetTimePoint != null) {
                 Calendar cal = new GregorianCalendar();
                 cal.setTime(resetTimePoint);
-                parent.getNode("reset").setValue(String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)));
+                parent.getNode(ConfigKeys.KEY_RESET).getNode(forType)
+                        .setComment("Minute period (number) OR 24-Hour time (hh:mm)")
+                        .setValue(String.format("%02d:%02d", cal.get(Calendar.HOUR_OF_DAY), cal.get(Calendar.MINUTE)));
             }
         }
     }
