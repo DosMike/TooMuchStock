@@ -67,10 +67,20 @@ to actually update the prices within the trackers.
 Once a price changes through a transaction, discrapency decay or reset a 
 PriceChangeEvent will be emitted for plugins to update their dispalys.
 
-/* Note: I'll add an example on how to optionally use this plugin, 
-so you do not have to depend on it */
+### Example Implementation
 
-**As Dependency**
+An example implementation of TooMuchStock as optional dependency is available in my plugin [VillagerShops](https://github.com/DosMike/VillagerShops).
+
+The abstraction is located in this package:    https://github.com/DosMike/VillagerShops/tree/master/src/main/java/de/dosmike/sponge/vshop/integrations/toomuchstock
+
+The dependency is initialized in `GameInitializationEvent` with `PriceCalculator.get()`
+
+And it's used in the buy and sell methods here:   
+https://github.com/DosMike/VillagerShops/blob/master/src/main/java/de/dosmike/sponge/vshop/shops/Purchase.java#L90
+
+*Please Note:* You will have write / copy the abstraction package in your plugin.
+
+### As Dependency
 
 ```
 repositories {
@@ -82,3 +92,6 @@ dependencies {
 	implementation 'com.github.DosMike:TooMuchStock:master-SNAPSHOT'
 }
 ```
+
+### I'm always open for suggestions:
+#### [Join my Discord](https://discord.gg/E592Gdu)
